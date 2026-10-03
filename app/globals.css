@@ -24,4 +24,5 @@
 .trace p{color:#bcb6cd}
 .honesty{color:#b2acbf}
 .mode-pill.checking i{background:#9e96ae;box-shadow:none}
+.app-shell{overflow:clip}
 @media(max-width:850px){.phone-stage{min-height:0}.constellation{height:min(34svh,290px)}.journey{padding-top:20px}.adventure-card{min-height:min(62svh,500px)}}
