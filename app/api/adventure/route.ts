@@ -37,7 +37,12 @@ function entitiesFrom(payload: unknown): QlooEntity[] {
 }
 
 function entityId(entity: QlooEntity): string | undefined {
-  return entity.entity_id ?? entity.id;
+  const id = entity.entity_id ?? entity.id;
+  return typeof id === "string" && id.trim() ? id : undefined;
+}
+
+function hasType(entity: QlooEntity, type: string): boolean {
+  return entity.subtype === type || entity.type === type;
 }
 
 async function qlooGet(url: URL, key: string): Promise<unknown> {
@@ -53,7 +58,7 @@ async function resolveEntity(base: string, key: string, name: string, type: stri
   url.searchParams.set("query", name);
   url.searchParams.set("types", type);
   url.searchParams.set("take", "20");
-  const entity = entitiesFrom(await qlooGet(url, key)).find(item => item.name?.toLocaleLowerCase() === name.toLocaleLowerCase() && (item.subtype === type || item.type === type) && entityId(item));
+  const entity = entitiesFrom(await qlooGet(url, key)).find(item => typeof item.name === "string" && item.name.toLocaleLowerCase() === name.toLocaleLowerCase() && hasType(item, type) && entityId(item));
   if (!entity) throw new Error("RESOLVE_FAILED");
   return { id: entityId(entity)!, name: entity.name!, type };
 }
@@ -66,9 +71,14 @@ export async function POST(request: NextRequest) {
   const key = process.env.QLOO_API_KEY;
   if (!key) return NextResponse.json(demo);
 
-  const body = await request.json().catch(() => ({})) as { reflections?: Array<{ who?: string; text?: string }> };
-  const you = body.reflections?.find(item => item.who === "you")?.text ?? "";
-  const mika = body.reflections?.find(item => item.who === "mika")?.text ?? "";
+  const body: unknown = await request.json().catch(() => null);
+  const reflections = body && typeof body === "object" && "reflections" in body && Array.isArray(body.reflections) ? body.reflections : [];
+  const reflection = (who: string): string => {
+    const item = reflections.find(value => value && typeof value === "object" && value.who === who);
+    return item && typeof item.text === "string" ? item.text : "";
+  };
+  const you = reflection("you");
+  const mika = reflection("mika");
   if (!/tokyo/i.test(you) || !/night/i.test(you) || !/soundtrack|indie/i.test(mika)) return fallback("unsupported conversation signals");
 
   try {
@@ -89,8 +99,8 @@ export async function POST(request: NextRequest) {
     url.searchParams.set("signal.interests.entities", resolved.map(entity => entity.id).join(","));
     url.searchParams.set("feature.explainability", "true");
     url.searchParams.set("take", "20");
-    const candidates = entitiesFrom(await qlooGet(url, key));
-    const selected = candidates.find(entity => entityId(entity) && entity.name && !known.has(entityId(entity)!));
+    const candidates = entitiesFrom(await qlooGet(url, key)).filter(entity => entityId(entity) && typeof entity.name === "string" && entity.name.trim() && hasType(entity, "urn:entity:place"));
+    const selected = candidates.find(entity => !known.has(entityId(entity)!));
     if (!selected) return fallback(candidates.length ? "no new Qloo place" : "empty Qloo result");
     const id = entityId(selected)!;
     const knownFilteredCount = candidates.filter(entity => entityId(entity) && known.has(entityId(entity)!)).length;
@@ -103,7 +113,7 @@ export async function POST(request: NextRequest) {
       place: selected.properties?.address ?? selected.properties?.geocode?.city ?? "Tokyo",
       detail: "Qloo place · explore together",
       mode: "LIVE",
-      reason: "Qloo returned this place for the combined film and music entities in Tokyo. The Journey history filter removed places already experienced. The app reveals the first remaining Qloo result; it does not assign its own affinity score.",
+      reason: "Qloo returned this place for the combined film and music entities in Tokyo. Together chose Phoenix as a curated soundtrack bridge; the emotional descriptions were not sent as Qloo taste signals. Together excluded IDs already saved in this Journey and reveals the first remaining Qloo result. No app affinity score is assigned.",
       trace: { reflections: [you.slice(0, 200), mika.slice(0, 200)], resolvedEntities: resolved, candidateCount: candidates.length, knownFilteredCount },
     });
   } catch (error) {

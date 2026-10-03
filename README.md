@@ -42,17 +42,20 @@ npm ci
 npm run dev
 ```
 
-The hosted Site uses the logical D1 binding `DB` from `.openai/hosting.json` and the migration in `drizzle/`. Configure `QLOO_API_KEY` as a **secret** in the existing Site's environment settings; do not put it in `.openai/hosting.json`. The Site must be redeployed after changing its runtime secret if the hosting platform requires it.
+The hosted Site uses the logical D1 binding `DB` from `.openai/hosting.json` and the migration in `drizzle/`. Open [Sites](https://chatgpt.com/sites), find **Together — AI Journey Partner**, then select **More actions → Settings**. Add `QLOO_API_KEY` as a **secret** in its hosted environment settings, enter the value directly there, and save. Never paste the value into chat or put it in `.openai/hosting.json`. Ask the agent to redeploy the approved saved version after saving; Sites applies runtime changes on the next deployment. See the [official Sites instructions](https://learn.chatgpt.com/docs/sites?surface=app). If this account redirects Sites to Library or has no settings control, do not assume that the documented screen is available.
 
 ## Validation
 
 ```bash
 npm run lint
 npx tsc --noEmit
+npm test
 npm run build
 ```
 
-No automated test suite is configured. The LIVE sequence must still be checked with an actual Qloo key and response before claiming it works: reflections → exact entity resolution → two IDs in Insights → returned place → D1 novelty filter → one reveal. Record the actual resolved IDs, candidate count, chosen place, and any API limitations without recording credentials. Check DEMO and FALLBACK separately.
+The route tests execute the actual adventure handler with isolated synthetic Qloo and D1 dependencies. They cover DEMO, two resolved signals, cross-domain type and ID validation, history exclusions, malformed reflections, empty results, resolution failures, 401/403, 429, 5xx, timeouts, and unavailable history. Their synthetic success case does **not** verify live Qloo connectivity or recommendation quality.
+
+The LIVE sequence must still be checked with an actual Qloo key and response before claiming it works: reflections → exact entity resolution → two IDs in Insights → returned place → D1 novelty filter → one reveal. Record the actual resolved IDs, candidate count, chosen place, and any API limitations without recording credentials. Check DEMO and FALLBACK separately.
 
 ## Privacy and limits
 
