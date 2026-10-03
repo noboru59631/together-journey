@@ -73,7 +73,7 @@ export default function Home(){
         {view==="journey"&&<Journey planned={planned} adventureTitle={adventure.title} onTalk={()=>setView("talk")}/>}
         {view==="talk"&&<Talk onContinue={()=>setView("spark")}/>} 
         {view==="spark"&&<SharedSpark onContinue={findAdventure}/>} 
-        {view==="reveal"&&<Reveal adventure={adventure} loading={loading} planned={planned} saveError={saveError} onExplain={()=>setExplainOpen(true)} onAccept={()=>saveJourney()} onReject={()=>setView("journey")} onReturn={()=>setView("return")}/>}
+        {view==="reveal"&&<Reveal adventure={adventure} loading={loading} planned={planned} saveError={saveError} onExplain={()=>setExplainOpen(true)} onAccept={()=>saveJourney()} onReject={()=>setView("journey")} onReturn={()=>{setSaved(false);setView("return")}}/>}
         {view==="return"&&<ReturnView note={note} setNote={setNote} reaction={reaction} setReaction={setReaction} saved={saved} saveError={saveError} onSave={()=>reaction&&saveJourney(reaction)} onJourney={()=>setView("journey")}/>}
       </div>
       <nav className="bottom-nav" aria-label="Primary navigation">
