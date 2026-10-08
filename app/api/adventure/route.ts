@@ -9,6 +9,7 @@ type QlooEntity = {
   name?: string;
   type?: string;
   subtype?: string;
+  types?: string[];
   properties?: {
     description?: string;
     address?: string;
@@ -42,7 +43,7 @@ function entityId(entity: QlooEntity): string | undefined {
 }
 
 function hasType(entity: QlooEntity, type: string): boolean {
-  return entity.subtype === type || entity.type === type;
+  return entity.subtype === type || entity.type === type || entity.types?.includes(type) === true;
 }
 
 async function qlooGet(url: URL, key: string): Promise<unknown> {

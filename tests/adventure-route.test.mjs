@@ -17,9 +17,9 @@ const reflections = [
   { who: "you", text: "Tokyo at night. It felt lonely, but somehow beautiful." },
   { who: "mika", text: "The soundtrack. I want more of that dreamy indie sound." },
 ];
-const film = { entity_id: "fixture-film", name: "Lost in Translation", subtype: "urn:entity:movie" };
-const artist = { entity_id: "fixture-artist", name: "Phoenix", subtype: "urn:entity:artist" };
-const place = { entity_id: "fixture-place", name: "Synthetic test venue", subtype: "urn:entity:place", properties: { address: "Synthetic address" } };
+const film = { entity_id: "fixture-film", name: "Lost in Translation", types: ["urn:entity:movie"] };
+const artist = { entity_id: "fixture-artist", name: "Phoenix", types: ["urn:entity:artist"] };
+const place = { entity_id: "fixture-place", name: "Synthetic test venue", types: ["urn:entity:place"], properties: { address: "Synthetic address" } };
 
 async function exercise({ key = "test-only-secret-sentinel", failure, candidates = [place], history = [], body = { reflections }, database = true, historyFailure = false, searchEmpty = false } = {}) {
   const calls = [];
