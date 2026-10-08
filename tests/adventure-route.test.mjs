@@ -20,6 +20,8 @@ const reflections = [
 const film = { entity_id: "fixture-film", name: "Lost in Translation", types: ["urn:entity:movie"] };
 const artist = { entity_id: "fixture-artist", name: "Phoenix", types: ["urn:entity:artist"] };
 const place = { entity_id: "fixture-place", name: "Synthetic test venue", types: ["urn:entity:place"], properties: { address: "Synthetic address" } };
+const destination = { entity_id: "fixture-destination", name: "Synthetic destination", types: ["urn:entity:destination"] };
+const book = { entity_id: "fixture-book", name: "Synthetic book", types: ["urn:entity:book"] };
 
 async function exercise({ key = "test-only-secret-sentinel", failure, candidates = [place], history = [], body = { reflections }, database = true, historyFailure = false, searchEmpty = false } = {}) {
   const calls = [];
@@ -40,8 +42,8 @@ async function exercise({ key = "test-only-secret-sentinel", failure, candidates
       calls.push({ url: new URL(url), options });
       if (failure instanceof Error || failure?.name === "TimeoutError") throw failure;
       if (typeof failure === "number") return { ok: false, status: failure };
-      const entities = url.pathname === "/search" ? searchEmpty ? [] : url.searchParams.get("query") === film.name ? [film] : [artist] : candidates;
-      return { ok: true, json: async () => ({ success: true, results: { entities } }) };
+      const entities = url.pathname === "/search" ? searchEmpty ? [] : url.searchParams.get("query") === film.name ? [film] : [artist] : url.searchParams.get("filter.type") === "urn:entity:destination" ? [destination] : url.searchParams.get("filter.type") === "urn:entity:book" ? [book] : candidates;
+      return { ok: true, status: 200, json: async () => ({ success: true, results: { entities } }) };
     },
   });
   vm.runInContext(compiled, context);
@@ -62,8 +64,10 @@ test("synthetic success passes both resolved IDs and filters known history", asy
   const { result, calls } = await exercise({ candidates: [place, nextPlace], history: [{ entity_id: "saved", qloo_entity_id: place.entity_id }] });
   assert.equal(result.mode, "LIVE");
   assert.equal(result.id, nextPlace.entity_id);
-  assert.equal(result.trace.candidateCount, 2);
+  assert.equal(result.trace.candidateCount, 4);
   assert.equal(result.trace.knownFilteredCount, 1);
+  assert.equal(JSON.stringify(result.trace.candidateCategories.map(category => [category.category, category.count])), JSON.stringify([["place", 2], ["destination", 1], ["book", 1]]));
+  assert.equal(JSON.stringify(result.trace.qlooApiCalls.map(call => [call.stage, call.category, call.status, call.resultCount])), JSON.stringify([["search", "movie", 200, 1], ["search", "artist", 200, 1], ["insights", "place", 200, 2], ["insights", "destination", 200, 1], ["insights", "book", 200, 1]]));
   const insight = calls.find(call => call.url.pathname === "/v2/insights");
   assert.equal(insight.url.searchParams.get("signal.interests.entities"), "fixture-film,fixture-artist");
   assert.equal(insight.url.searchParams.get("filter.type"), "urn:entity:place");
