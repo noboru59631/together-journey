@@ -76,32 +76,35 @@ const extractionJsonSchema = {
       type: "object",
       additionalProperties: false,
       properties: {
-        title: { type: "string" },
+        title: { type: "string", minLength: 1, maxLength: 120 },
         category: { type: "string", enum: ["movie", "music", "food", "book", "place", "show", "podcast", "other"] },
       },
       required: ["title", "category"],
     },
     participants: {
       type: "array",
+      minItems: 2,
+      maxItems: 2,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
           id: { type: "string", enum: ["you", "partner"] },
-          label: { type: "string" },
-          likes: { type: "array", items: { type: "string" } },
-          dislikes: { type: "array", items: { type: "string" } },
-          emotionalContext: { type: "array", items: { type: "string" } },
+          label: { type: "string", minLength: 1, maxLength: 40 },
+          likes: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 100 } },
+          dislikes: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 100 } },
+          emotionalContext: { type: "array", maxItems: 5, items: { type: "string", minLength: 1, maxLength: 120 } },
           entities: {
             type: "array",
+            maxItems: 5,
             items: {
               type: "object",
               additionalProperties: false,
               properties: {
-                name: { type: "string" },
+                name: { type: "string", minLength: 1, maxLength: 120 },
                 type: { type: "string", enum: [...qlooTypes] },
-                why: { type: "string" },
-                confidence: { type: "number" },
+                why: { type: "string", minLength: 1, maxLength: 240 },
+                confidence: { type: "number", minimum: 0, maximum: 1 },
                 provenance: { type: "string", enum: ["explicit", "inferred"] },
               },
               required: ["name", "type", "why", "confidence", "provenance"],
@@ -114,16 +117,19 @@ const extractionJsonSchema = {
     sharedSpark: {
       type: "object",
       additionalProperties: false,
-      properties: { title: { type: "string" }, summary: { type: "string" } },
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 80 },
+        summary: { type: "string", minLength: 1, maxLength: 280 },
+      },
       required: ["title", "summary"],
     },
     location: {
       type: "object",
       additionalProperties: false,
-      properties: { query: { type: "string" }, provenance: { type: "string", enum: ["explicit", "none"] } },
+      properties: { query: { type: "string", maxLength: 100 }, provenance: { type: "string", enum: ["explicit", "none"] } },
       required: ["query", "provenance"],
     },
-    confidence: { type: "number" },
+    confidence: { type: "number", minimum: 0, maximum: 1 },
   },
   required: ["experience", "participants", "sharedSpark", "location", "confidence"],
 } as const;
