@@ -1,48 +1,80 @@
 # Together — AI Journey Partner
 
-**Make Life More Interesting. Together.** AI shouldn't replace your friends. It should give you more to share with them. What should we experience next?
+**Don't show recommendations. Reveal adventures.** Together turns two people's different reactions to a shared cultural moment into one grounded thing worth doing together. AI adds a chapter to an existing friendship, family relationship, or partnership; it does not replace it.
 
-Together is a Qloo Hackathon MVP: two friends reflect on *Lost in Translation*, discover their Shared Spark, and reveal **one** next adventure. It is a prepared two-person story, not a general-purpose chat or a stranger-matching service.
+## Product flow
 
-## Try the demo
+1. Name a shared film, meal, concert, book, place, show, or podcast.
+2. Each person writes what stayed with them, including likes, dislikes, and emotional context.
+3. The Conversation Engine extracts a strict, typed taste-signal object.
+4. Every proposed cultural entity is searched in Qloo. Only an exact normalized name, expected type, and real Qloo ID can become a signal.
+5. Qloo Insights expands the verified inputs into places, books, and destinations.
+6. Together removes previously proposed or experienced IDs, applies a practicality preference, and reveals exactly one adventure.
+7. “Why this adventure?” separates the LLM interpretation, verified Qloo input entities, Qloo's cross-domain result, and Together's own selection/copy.
+8. Afterward, a reaction and optional reflection are saved to the browser's anonymous D1-backed Journey.
 
-1. Open the Journey Map and tap **Talk about today**.
-2. Read the two prepared reflections: Tokyo at night, lonely but beautiful; and the indie soundtrack.
-3. Tap **See your Shared Spark**, then **Let's follow it**.
-4. Open **Why this adventure?** to inspect the inputs, Qloo entities when LIVE, and the Journey history filter.
-5. Tap **Let's go**, then **We went—tell you about it** to save a reaction in D1.
-
-The listening-bar image and story are **DEMO/FALLBACK artwork and copy**. LIVE place results are displayed without that artwork, so a Qloo result is never illustrated as a specific venue that Qloo did not provide.
+The first screen leads directly into this flow. It is not a dashboard, ranking, matching service, or recommendation list.
 
 ## Architecture
 
-- **Conversation:** The MVP reads two fixed reflections. A deterministic check separates the Tokyo/night context and soundtrack/indie cue from emotional language. It supports this prepared script only; it does not run an LLM or claim broad natural-language understanding.
-- **Qloo:** The server resolves the exact movie *Lost in Translation* and soundtrack artist *Phoenix* through `/search`, checking names, types, and returned IDs. Phoenix's “Too Young” appears in the film's soundtrack; using that artist is a **curated bridge**, not a fact inferred by Qloo from the user's words. It passes both actual IDs as `signal.interests.entities` to concurrent `/v2/insights` requests for places, destinations, and books. The place request also uses `filter.location.query=Tokyo`; every request enables `feature.explainability=true`. The one revealed adventure is selected from the place results after Journey history is excluded, while the other categories verify cross-domain taste propagation.
-- **Journey:** D1 stores saved experiences and optional reflections under a random, browser-specific, HttpOnly journey cookie. Before a LIVE reveal, the server removes Qloo candidates whose IDs appear in that browser's Journey history, then selects the first remaining Qloo result. The UI reveals one result, never a list.
-- **Explanation:** “Why this adventure?” shows the actual resolved entity names and IDs, per-category result counts, sanitized API statuses, and the count excluded by Journey history. Together writes the prose explanation. It does not display an invented score or claim that every input independently caused the selected result.
+### Conversation Engine
 
-Qloo is essential to LIVE: it supplies both the resolved cultural entities and the cross-domain place results. No LLM creates a venue. See the [Qloo search reference](https://github.com/qloo/docs-public/blob/main/reference/get-search.md), [Insights parameters](https://github.com/qloo/docs-public/blob/main/reference/insights-api-deep-dive.md), and [soundtrack source](https://www.focusfeatures.com/article/the_music_of_sofia_coppola).
+The server calls the OpenAI Responses API with Structured Outputs and a strict JSON Schema. The result includes:
 
-## Modes and failures
+- experience title and category;
+- two participant records with likes, dislikes, emotional context, and concrete cultural entity candidates;
+- confidence and explicit/inferred provenance for every entity;
+- a concise Shared Spark; and
+- an explicit location hint or `none`.
+
+Application-side Zod validation still checks bounds, participant IDs, and required fields. Calls time out after nine seconds. A retry is allowed once for timeout, 429, 5xx, empty output, invalid JSON, or schema failure; non-retryable authorization failures stop immediately. User text is passed as data, and the system instruction forbids recommendations and invented cultural relationships.
+
+The default model is `gpt-4o-mini`, configurable through `OPENAI_MODEL`. Structured Outputs are used instead of JSON mode, following the [official OpenAI Structured Outputs guide](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
+
+### Qloo Taste Engine
+
+The LLM does not create Qloo IDs and cannot make a candidate LIVE. Each entity with confidence at least `0.65` is sent to Qloo `/search` with its expected type. Together accepts only an exact normalized name match, the expected Qloo type, and a non-empty returned ID. Low-confidence, mismatched, unresolved, and duplicate entities are shown as unused.
+
+At least two distinct entities, covering both people, must resolve before `/v2/insights` runs. This removes the former fixed *Lost in Translation* → Phoenix bridge. Any inferred relationship stays tentative; only the independently resolved Qloo entity is used.
+
+The verified IDs are passed to concurrent Insights requests for `place`, `book`, and `destination`, with explainability enabled. An explicit city is applied only to the place request. Without a location, a book is preferred over a potentially impractical distant place; with a location, a nearby place is preferred. Every LIVE reveal is a real Qloo result. Together never asks the LLM to invent a venue, book, or destination.
+
+Qloo is indispensable: it verifies the cultural entities and supplies every LIVE cross-domain candidate. Without Qloo, Together can interpret a conversation but cannot produce a LIVE adventure. See the [Qloo Search reference](https://github.com/qloo/docs-public/blob/main/reference/get-search.md) and [Insights API guide](https://github.com/qloo/docs-public/blob/main/reference/insights-api-deep-dive.md).
+
+### Journey Engine
+
+D1 stores saved experiences under a random, browser-specific, HttpOnly journey cookie. Before each reveal, the server excludes all previously proposed or experienced Qloo IDs. Saved records include the selected Qloo ID, dynamic source experience, partner label, verified cultural signals, emotional signals, reaction, and optional reflection. Storage failure preserves the current UI and shows a retryable error.
+
+## Modes
 
 | Mode | Meaning |
 | --- | --- |
-| **LIVE** | Both Qloo entities resolve, Insights returns a new place, and the D1 history filter succeeds. |
-| **DEMO** | `QLOO_API_KEY` is absent. A fixed, clearly labeled story is shown. |
-| **FALLBACK** | Qloo, history lookup, or the adventure service fails; the same fixed story is labeled as a fallback. |
+| **LIVE** | LLM extraction passed strict validation, both people contributed Qloo-verified entities, Qloo Insights returned a usable new candidate, and D1 novelty filtering succeeded. |
+| **NEEDS_INPUT** | The LLM ran, but fewer than two distinct cross-person entities could be verified. Insights is not called. The UI asks for one more concrete cultural clue. |
+| **DEMO** | `OPENAI_API_KEY` is absent. A prepared activity is shown and the product explicitly says free-form understanding is not active. |
+| **FALLBACK** | A configured LLM, Qloo, or Journey dependency failed. A prepared activity is clearly labeled and no LIVE recommendation is claimed. |
 
-Empty results, unresolved entities, 401/403, 429, 5xx, and timeouts enter FALLBACK. The API key, raw Qloo error body, and request headers are never logged or returned to the browser. An empty or weak result is never replaced with an LLM-invented LIVE recommendation.
+HTTP 401/403, 429, 5xx, timeouts, malformed structured output, weak confidence, entity mismatch, empty results, duplicate-only results, and D1 failures are handled without exposing credentials or raw provider errors.
 
-## Setup
+## Local setup
 
-Requires Node.js 22.13 or newer. Install dependencies, copy `.env.example` to an ignored `.env.local`, and set `QLOO_API_KEY` only in that local file or the hosting secret manager. The default API host is `https://hackathon.api.qloo.com`; set `QLOO_API_BASE_URL` only if your Qloo account uses a different host. Keep the key out of Git, issue reports, screenshots, and client code.
+Requires Node.js 22.13 or newer.
 
 ```bash
 npm ci
 npm run dev
 ```
 
-The hosted Site uses the logical D1 binding `DB` from `.openai/hosting.json` and the migration in `drizzle/`. Open [Sites](https://chatgpt.com/sites), find **Together — AI Journey Partner**, then select **More actions → Settings**. Add `QLOO_API_KEY` as a **secret** in its hosted environment settings, enter the value directly there, and save. Never paste the value into chat or put it in `.openai/hosting.json`. Ask the agent to redeploy the approved saved version after saving; Sites applies runtime changes on the next deployment. See the [official Sites instructions](https://learn.chatgpt.com/docs/sites?surface=app). If this account redirects Sites to Library or has no settings control, do not assume that the documented screen is available.
+Copy `.env.example` to an ignored `.env.local` and set values only there. Never commit, log, screenshot, or paste secrets into chat.
+
+| Variable | Purpose |
+| --- | --- |
+| `QLOO_API_KEY` | Required for Qloo Search and Insights. |
+| `QLOO_API_BASE_URL` | Optional; defaults to the Qloo hackathon host. |
+| `OPENAI_API_KEY` | Required for LIVE free-form Conversation Engine extraction. |
+| `OPENAI_MODEL` | Optional; defaults to `gpt-4o-mini`. |
+
+For the hosted Site, open **Together — AI Journey Partner → Settings → Environment variables**, add `OPENAI_API_KEY` as a **secret**, optionally add `OPENAI_MODEL` as a normal variable, and redeploy. Enter the key directly in Sites; do not send it in chat. `QLOO_API_KEY` is already expected as a Site secret. The Site manifest contains only the logical D1 binding and project ID.
 
 ## Validation
 
@@ -53,12 +85,28 @@ npm test
 npm run build
 ```
 
-The route tests execute the actual adventure handler with isolated synthetic Qloo and D1 dependencies. They cover DEMO, two resolved signals, cross-domain type and ID validation, history exclusions, malformed reflections, empty results, resolution failures, 401/403, 429, 5xx, timeouts, and unavailable history. Their synthetic success case does **not** verify live Qloo connectivity or recommendation quality.
+The tests execute the real route handlers with isolated synthetic OpenAI, Qloo, and D1 dependencies. They cover two unrelated free-form conversation shapes, strict-output retry, wrong-entity rejection, low confidence, unresolved signals, duplicate history, 401/403/429/5xx, timeouts, LIVE/DEMO/FALLBACK/NEEDS_INPUT behavior, malformed input, and Journey save failure. Synthetic tests do not prove provider connectivity or recommendation quality.
 
-The prepared LIVE sequence was verified end to end on 2026-10-08 with a configured Site secret: reflections → exact entity resolution → two IDs in three Insights requests → returned places/destinations/books → D1 novelty filter → one reveal → reaction/reflection save. Every live Qloo request returned HTTP 200 with 20 results. The first reveal was St. Mary's Cathedral, Tokyo; after saving it, a repeat run excluded that Qloo ID and revealed The Okura Prestige Tower. Desktop and 390 × 844 mobile browser flows both completed, and both saved records were confirmed in D1. No secret values are recorded in application diagnostics or this document.
+LIVE release acceptance requires two previously unregistered conversations to complete this exact path in production: LLM extraction → two or more verified Qloo entities → three Insights categories → one reveal → explanation → return reflection → D1 row. Reviewers must judge both surprise and real-world feasibility; HTTP 200 alone is not a pass.
+
+## 60-second demo story
+
+> Together begins with something two people already shared. I enter *Princess Mononoke*: I remember the ancient forest and want somewhere quiet; Mika remembers Joe Hisaishi's music and wants wonder without crowds. The Conversation Engine structures those differences, but it cannot declare cultural facts. Qloo Search verifies the actual movie and artist IDs. Qloo Insights then crosses domains and returns real places, books, and destinations. Together removes anything already in our Journey, favors what we can realistically do near Tokyo, and reveals one adventure—not a list. In “Why this adventure?” you can see the LLM context, Qloo-verified inputs, Qloo's result, and Together's selection rule separately. We go, come back, and save what happened. That memory changes what can be revealed next. AI did not replace our relationship; it gave us one more story to share.
+
+## Devpost checklist
+
+- [ ] Confirm the repository is publicly visible; changing GitHub visibility requires the owner's explicit approval.
+- [x] Include an OSI-compatible license (`MIT`).
+- [x] Document architecture, provider responsibilities, failure modes, privacy, and Qloo's indispensable role.
+- [x] Keep secrets out of source, history, screenshots, logs, and submission text.
+- [ ] Configure `OPENAI_API_KEY` as a Site secret and complete two production LLM LIVE runs.
+- [ ] Capture the 60-second demo using one LIVE run and the layered explanation.
+- [ ] Add final screenshots/video, public repository URL, deployed Site URL, and technology list to Devpost.
+- [ ] Verify the public Site is accessible without sign-in immediately before submission.
+- [ ] Submit on Devpost manually; this repository does not automate or finalize submission.
 
 ## Privacy and limits
 
-The demo conversation is fictional and fixed. Saved reactions and optional reflections remain in D1 for that browser's anonymous Journey cookie; the cookie is HttpOnly, Secure in production, and expires after 90 days. The app has no account recovery, cross-device sharing, deletion UI, content moderation, or production-grade rate limiting. Do not enter sensitive personal information in the optional reflection. The Journey Map itself is an illustrative UI; saved D1 history currently affects novelty filtering but does not rebuild the visual map after a reload.
+Conversation text is sent server-side to the configured LLM provider for extraction. Only verified Qloo entity IDs are sent to Qloo Insights. API keys remain server-side. Saved reactions and optional reflections remain in D1 for the anonymous browser Journey cookie, which is HttpOnly, Secure in production, SameSite Lax, and expires after 90 days.
 
-This MVP does not include stranger matching, an SNS feed, rankings, taste percentages, points, or a grid of recommendations. The prepared Qloo LIVE path is verified, but general LLM signal extraction is not implemented: the current experience supports the fixed reflections above and uses a deterministic Tokyo cue plus a curated Phoenix soundtrack bridge.
+Do not enter sensitive personal information. The MVP has no account recovery, cross-device sharing, deletion UI, moderation, or production-grade rate limiting. It intentionally has no stranger matching, social feed, taste score, leaderboard, or multi-result recommendation grid.

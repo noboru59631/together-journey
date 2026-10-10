@@ -34,9 +34,10 @@ export async function POST(request: NextRequest) {
   const id = journeyId(request);
   try {
     if (!env.DB) throw new Error("D1 unavailable");
-    await env.DB.prepare("INSERT INTO experiences (id, journey_id, entity_id, qloo_entity_id, title, type, reaction, reflection, cultural_signals, emotional_signals, with_whom, discovered_from, experienced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(journey_id, entity_id) DO UPDATE SET reaction=excluded.reaction, reflection=excluded.reflection, experienced_at=excluded.experienced_at").bind(
+    await env.DB.prepare("INSERT INTO experiences (id, journey_id, entity_id, qloo_entity_id, title, type, reaction, reflection, cultural_signals, emotional_signals, with_whom, discovered_from, experienced_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(journey_id, entity_id) DO UPDATE SET reaction=excluded.reaction, reflection=excluded.reflection, cultural_signals=excluded.cultural_signals, emotional_signals=excluded.emotional_signals, experienced_at=excluded.experienced_at").bind(
       crypto.randomUUID(), id, body.entityId, typeof body.qlooEntityId === "string" ? body.qlooEntityId : null, body.title, body.type, body.reaction,
-      typeof body.reflection === "string" ? body.reflection : "", JSON.stringify(body.culturalSignals ?? []), "[]", "Mika", "Lost in Translation", new Date().toISOString()
+      typeof body.reflection === "string" ? body.reflection : "", JSON.stringify(body.culturalSignals ?? []), JSON.stringify(body.emotionalSignals ?? []),
+      typeof body.withWhom === "string" ? body.withWhom.slice(0, 80) : "Partner", typeof body.discoveredFrom === "string" ? body.discoveredFrom.slice(0, 160) : "Shared conversation", new Date().toISOString()
     ).run();
     return withJourneyCookie(NextResponse.json({ saved: true, persistence: "D1" }), id);
   } catch {
