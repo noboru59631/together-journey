@@ -95,13 +95,15 @@ LIVE release acceptance requires two previously unregistered conversations to co
 
 ## Devpost checklist
 
-- [ ] Confirm the repository is publicly visible; changing GitHub visibility requires the owner's explicit approval.
+- [ ] Create or connect the public `together-journey` repository and confirm it is publicly visible.
 - [x] Include an OSI-compatible license (`MIT`).
 - [x] Document architecture, provider responsibilities, failure modes, privacy, and Qloo's indispensable role.
 - [x] Keep secrets out of source, history, screenshots, logs, and submission text.
 - [ ] Configure `OPENAI_API_KEY` as a Site secret and complete two production LLM LIVE runs.
-- [ ] Capture the 60-second demo using one LIVE run and the layered explanation.
-- [ ] Add final screenshots/video, public repository URL, deployed Site URL, and technology list to Devpost.
+- [x] Keep the externally hosted Site public and accessible without sign-in.
+- [ ] Add the public repository URL to `DEVPOST.md` and Devpost.
+- [ ] Copy the final text from `DEVPOST.md`, add screenshots if useful, and verify the technology list.
+- [ ] Optionally capture the 60-second demo story; the 2026 Agentic Hackathon does not require a video.
 - [ ] Verify the public Site is accessible without sign-in immediately before submission.
 - [ ] Submit on Devpost manually; this repository does not automate or finalize submission.
 
