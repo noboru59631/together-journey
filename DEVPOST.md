@@ -71,9 +71,11 @@ The UI never labels a prepared activity as `LIVE`. Missing credentials produce `
 
 MIT
 
-## Final pre-submit blockers
+## Final pre-submit status
 
-- Add OpenAI API credits; the production key is configured, but the current API account returns `credit_balance_exhausted`.
-- Complete and record the two production `LIVE` runs plus both guardrail runs after credits are available.
-- Create the public GitHub repository at the URL above and verify its CI workflow is green.
-- Recheck the public Site immediately before the manual Devpost submission.
+- Production Site Version 17 is public and the OpenAI and Qloo production secrets are configured.
+- `Princess Mononoke` + `Joe Hisaishi` and `Norwegian Wood` + `Blue Bottle Coffee` both completed as genuine `LIVE` runs with two Qloo-verified entities.
+- Vague input requested more detail, and the fabricated `The Sapphire Engines` + `Luna Vantrel` pair was not accepted as `LIVE`.
+- Production logs showed successful requests with no errors, warnings, or detected secret values.
+- The public GitHub repository is available and GitHub Actions passes tests, lint, typecheck, and build.
+- Remaining manual action: copy these fields into Devpost, optionally add screenshots or a video, review the preview, and press the final Submit button personally.

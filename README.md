@@ -98,17 +98,18 @@ LIVE release acceptance requires two previously unregistered conversations to co
 
 ## Devpost checklist
 
-- [ ] Create the public `noboru59631/together-journey` repository and confirm it is publicly visible.
+- [x] Create the public `noboru59631/together-journey` repository and confirm it is publicly visible.
 - [x] Include an OSI-compatible license (`MIT`).
 - [x] Document architecture, provider responsibilities, failure modes, privacy, and Qloo's indispensable role.
 - [x] Keep secrets out of source, history, screenshots, logs, and submission text.
 - [x] Configure `OPENAI_API_KEY` as a production Site secret and redeploy with environment revision 3.
-- [ ] Add OpenAI API credits, then complete two production LLM LIVE runs and both guardrail runs.
+- [x] Add OpenAI API credits, then complete two production LLM LIVE runs and both guardrail runs.
 - [x] Keep the externally hosted Site public and accessible without sign-in.
-- [x] Add the intended public repository URL to `DEVPOST.md`; verify it resolves after repository creation.
+- [x] Add the public repository URL to `DEVPOST.md` and verify it resolves.
+- [x] Run GitHub Actions CI for tests, lint, typecheck, and build.
 - [ ] Copy the final text from `DEVPOST.md`, add screenshots if useful, and verify the technology list.
 - [ ] Optionally capture the 60-second demo story; the 2026 Agentic Hackathon does not require a video.
-- [ ] Verify the public Site is accessible without sign-in immediately before submission.
+- [x] Verify the public Site is accessible without sign-in immediately before submission preparation.
 - [ ] Submit on Devpost manually; this repository does not automate or finalize submission.
 
 ## Privacy and limits
