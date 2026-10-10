@@ -14,7 +14,7 @@ https://together-journey-qloo.crypto5555111.chatgpt.site/
 
 ## Public code repository
 
-TODO: add the public GitHub, GitLab, or Bitbucket URL before submission.
+https://github.com/noboru59631/together-journey
 
 ## What it does
 
@@ -73,7 +73,7 @@ MIT
 
 ## Final pre-submit blockers
 
-- Configure `OPENAI_API_KEY` as a production Site secret and redeploy.
-- Complete and record the two production `LIVE` runs plus both guardrail runs.
-- Create or connect a public code repository and replace the repository TODO above.
+- Add OpenAI API credits; the production key is configured, but the current API account returns `credit_balance_exhausted`.
+- Complete and record the two production `LIVE` runs plus both guardrail runs after credits are available.
+- Create the public GitHub repository at the URL above and verify its CI workflow is green.
 - Recheck the public Site immediately before the manual Devpost submission.

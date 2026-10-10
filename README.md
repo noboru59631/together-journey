@@ -2,6 +2,9 @@
 
 **Don't show recommendations. Reveal adventures.** Together turns two people's different reactions to a shared cultural moment into one grounded thing worth doing together. AI adds a chapter to an existing friendship, family relationship, or partnership; it does not replace it.
 
+- Public demo: https://together-journey-qloo.crypto5555111.chatgpt.site/
+- Public source: https://github.com/noboru59631/together-journey
+
 ## Product flow
 
 1. Name a shared film, meal, concert, book, place, show, or podcast.
@@ -95,13 +98,14 @@ LIVE release acceptance requires two previously unregistered conversations to co
 
 ## Devpost checklist
 
-- [ ] Create or connect the public `together-journey` repository and confirm it is publicly visible.
+- [ ] Create the public `noboru59631/together-journey` repository and confirm it is publicly visible.
 - [x] Include an OSI-compatible license (`MIT`).
 - [x] Document architecture, provider responsibilities, failure modes, privacy, and Qloo's indispensable role.
 - [x] Keep secrets out of source, history, screenshots, logs, and submission text.
-- [ ] Configure `OPENAI_API_KEY` as a Site secret and complete two production LLM LIVE runs.
+- [x] Configure `OPENAI_API_KEY` as a production Site secret and redeploy it with Version 13.
+- [ ] Add OpenAI API credits, then complete two production LLM LIVE runs and both guardrail runs.
 - [x] Keep the externally hosted Site public and accessible without sign-in.
-- [ ] Add the public repository URL to `DEVPOST.md` and Devpost.
+- [x] Add the intended public repository URL to `DEVPOST.md`; verify it resolves after repository creation.
 - [ ] Copy the final text from `DEVPOST.md`, add screenshots if useful, and verify the technology list.
 - [ ] Optionally capture the 60-second demo story; the 2026 Agentic Hackathon does not require a video.
 - [ ] Verify the public Site is accessible without sign-in immediately before submission.

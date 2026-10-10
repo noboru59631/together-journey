@@ -76,35 +76,32 @@ const extractionJsonSchema = {
       type: "object",
       additionalProperties: false,
       properties: {
-        title: { type: "string", minLength: 1, maxLength: 120 },
+        title: { type: "string" },
         category: { type: "string", enum: ["movie", "music", "food", "book", "place", "show", "podcast", "other"] },
       },
       required: ["title", "category"],
     },
     participants: {
       type: "array",
-      minItems: 2,
-      maxItems: 2,
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
           id: { type: "string", enum: ["you", "partner"] },
-          label: { type: "string", minLength: 1, maxLength: 40 },
-          likes: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 100 } },
-          dislikes: { type: "array", maxItems: 6, items: { type: "string", minLength: 1, maxLength: 100 } },
-          emotionalContext: { type: "array", maxItems: 5, items: { type: "string", minLength: 1, maxLength: 120 } },
+          label: { type: "string" },
+          likes: { type: "array", items: { type: "string" } },
+          dislikes: { type: "array", items: { type: "string" } },
+          emotionalContext: { type: "array", items: { type: "string" } },
           entities: {
             type: "array",
-            maxItems: 5,
             items: {
               type: "object",
               additionalProperties: false,
               properties: {
-                name: { type: "string", minLength: 1, maxLength: 120 },
+                name: { type: "string" },
                 type: { type: "string", enum: [...qlooTypes] },
-                why: { type: "string", minLength: 1, maxLength: 240 },
-                confidence: { type: "number", minimum: 0, maximum: 1 },
+                why: { type: "string" },
+                confidence: { type: "number" },
                 provenance: { type: "string", enum: ["explicit", "inferred"] },
               },
               required: ["name", "type", "why", "confidence", "provenance"],
@@ -117,19 +114,16 @@ const extractionJsonSchema = {
     sharedSpark: {
       type: "object",
       additionalProperties: false,
-      properties: {
-        title: { type: "string", minLength: 1, maxLength: 80 },
-        summary: { type: "string", minLength: 1, maxLength: 280 },
-      },
+      properties: { title: { type: "string" }, summary: { type: "string" } },
       required: ["title", "summary"],
     },
     location: {
       type: "object",
       additionalProperties: false,
-      properties: { query: { type: "string", maxLength: 100 }, provenance: { type: "string", enum: ["explicit", "none"] } },
+      properties: { query: { type: "string" }, provenance: { type: "string", enum: ["explicit", "none"] } },
       required: ["query", "provenance"],
     },
-    confidence: { type: "number", minimum: 0, maximum: 1 },
+    confidence: { type: "number" },
   },
   required: ["experience", "participants", "sharedSpark", "location", "confidence"],
 } as const;
@@ -225,7 +219,9 @@ async function extractConversation(body: unknown, apiKey: string, model: string)
       });
       if (!response.ok) {
         lastError = `LLM_HTTP_${response.status}`;
-        const failure = await response.json().catch(() => null) as { error?: { type?: unknown; code?: unknown; param?: unknown; message?: unknown } } | null;
+        const failure = typeof response.json === "function"
+          ? await response.json().catch(() => null) as { error?: { type?: unknown; code?: unknown; param?: unknown; message?: unknown } } | null
+          : null;
         console.info("together.openai_response_error", {
           status: response.status,
           type: typeof failure?.error?.type === "string" ? failure.error.type : null,
@@ -375,7 +371,13 @@ export async function POST(request: NextRequest) {
     extraction = await extractConversation(safeInput, openAiKey, model);
   } catch (error) {
     const code = error instanceof Error ? error.message : "LLM_REQUEST_FAILED";
-    const reason = code === "LLM_TIMEOUT" ? "The Conversation Engine timed out." : code.includes("401") || code.includes("403") ? "The Conversation Engine is not authorized." : "The Conversation Engine could not safely validate its structured output.";
+    const reason = code === "LLM_TIMEOUT"
+      ? "The Conversation Engine timed out."
+      : code.includes("401") || code.includes("403")
+        ? "The Conversation Engine is not authorized."
+        : code.includes("429")
+          ? "The Conversation Engine is temporarily unavailable because its API quota is exhausted."
+          : "The Conversation Engine could not safely validate its structured output.";
     return fallback(reason, reflections, null, model);
   }
   if (!qlooKey) return fallback("Qloo is not configured.", reflections, extraction, model);

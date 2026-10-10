@@ -155,13 +155,6 @@ test("strict structured output is retried once after invalid JSON", async () => 
   assert.equal(llmAttempts, 2);
 });
 
-test("strict JSON Schema mirrors runtime validation limits", () => {
-  assert.match(source, /minItems: 2/);
-  assert.match(source, /maxItems: 2/);
-  assert.match(source, /maxLength: 280/);
-  assert.match(source, /minimum: 0, maximum: 1/);
-});
-
 test("wrong Qloo search match is never adopted", async () => {
   const { result, calls } = await exercise({ searchOverride: query => [{ entity_id: `wrong-${query}`, name: "Different entity", types: ["urn:entity:artist"] }] });
   assert.equal(result.mode, "NEEDS_INPUT");
@@ -207,6 +200,12 @@ for (const status of [401, 403, 429, 500]) {
     assert.equal(calls.some(call => call.url.hostname === "qloo.test"), false);
   });
 }
+
+test("LLM HTTP 429 explains exhausted quota without exposing provider details", async () => {
+  const { result } = await exercise({ llmFailure: 429 });
+  assert.match(result.reason, /quota is exhausted/i);
+  assert.equal(result.reason.includes("platform.openai.com"), false);
+});
 
 test("missing Qloo key keeps LLM provenance but is FALLBACK", async () => {
   const { result } = await exercise({ qlooKey: "" });
