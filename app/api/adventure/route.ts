@@ -15,6 +15,14 @@ const qlooTypes = [
   "urn:entity:brand",
 ] as const;
 
+const experienceQlooTypes: Partial<Record<string, typeof qlooTypes[number]>> = {
+  movie: "urn:entity:movie",
+  book: "urn:entity:book",
+  place: "urn:entity:place",
+  show: "urn:entity:tv_show",
+  podcast: "urn:entity:podcast",
+};
+
 const entitySchema = z.object({
   name: z.string().trim().min(1).max(120),
   type: z.enum(qlooTypes),
@@ -387,7 +395,14 @@ export async function POST(request: NextRequest) {
   const unresolvedEntities: Array<{ name: string; type: string; reason: string }> = [];
   try {
     const base = process.env.QLOO_API_BASE_URL ?? "https://hackathon.api.qloo.com";
-    const candidates = extraction.participants.flatMap(participant => participant.entities.filter(entity => entity.confidence >= 0.65).slice(0, 3).map(entity => ({ participant: participant.id, entity })));
+    const extractedCandidates = extraction.participants.flatMap(participant => participant.entities.filter(entity => entity.confidence >= 0.65).slice(0, 3).map(entity => ({ participant: participant.id, entity })));
+    const experienceType = experienceQlooTypes[safeInput.experience.category];
+    const experienceTitle = safeInput.experience.title;
+    const firstReflection = safeInput.reflections.find(reflection => reflection.id === "you")?.text ?? "";
+    const explicitExperience = experienceType && normalized(firstReflection).includes(normalized(experienceTitle))
+      ? [{ participant: "you" as const, entity: { name: experienceTitle, type: experienceType, why: "Explicit shared experience named in the participant reflection.", confidence: 1, provenance: "explicit" as const } }]
+      : [];
+    const candidates = [...explicitExperience, ...extractedCandidates].filter((candidate, index, all) => all.findIndex(other => other.participant === candidate.participant && other.entity.type === candidate.entity.type && normalized(other.entity.name) === normalized(candidate.entity.name)) === index);
     for (const candidate of candidates) {
       const resolved = await resolveEntity(base, qlooKey, candidate.entity, candidate.participant, qlooApiCalls);
       if (resolved && !resolvedEntities.some(entity => entity.id === resolved.id)) resolvedEntities.push(resolved);

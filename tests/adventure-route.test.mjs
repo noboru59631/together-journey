@@ -155,6 +155,14 @@ test("strict structured output is retried once after invalid JSON", async () => 
   assert.equal(llmAttempts, 2);
 });
 
+test("an explicitly repeated shared experience is verified even when the LLM omits it from participant entities", async () => {
+  const omitted = structuredClone(extraction);
+  omitted.participants[0].entities = [];
+  const { result } = await exercise({ extractionResult: omitted });
+  assert.equal(result.mode, "LIVE");
+  assert.equal(JSON.stringify(result.trace.resolvedEntities.map(entity => entity.name)), JSON.stringify(["Princess Mononoke", "Joe Hisaishi"]));
+});
+
 test("wrong Qloo search match is never adopted", async () => {
   const { result, calls } = await exercise({ searchOverride: query => [{ entity_id: `wrong-${query}`, name: "Different entity", types: ["urn:entity:artist"] }] });
   assert.equal(result.mode, "NEEDS_INPUT");
@@ -168,7 +176,8 @@ test("low-confidence entities are not searched or sent to Insights", async () =>
   low.participants[1].entities[0].confidence = 0.2;
   const { result, calls } = await exercise({ extractionResult: low });
   assert.equal(result.mode, "NEEDS_INPUT");
-  assert.equal(calls.filter(call => call.url.hostname === "qloo.test").length, 0);
+  assert.equal(calls.filter(call => call.url.pathname === "/search").length, 1);
+  assert.equal(calls.some(call => call.url.pathname === "/v2/insights"), false);
   assert.equal(result.trace.unresolvedEntities.every(entity => /confidence/.test(entity.reason)), true);
 });
 
