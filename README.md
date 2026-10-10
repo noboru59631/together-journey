@@ -102,7 +102,7 @@ LIVE release acceptance requires two previously unregistered conversations to co
 - [x] Include an OSI-compatible license (`MIT`).
 - [x] Document architecture, provider responsibilities, failure modes, privacy, and Qloo's indispensable role.
 - [x] Keep secrets out of source, history, screenshots, logs, and submission text.
-- [x] Configure `OPENAI_API_KEY` as a production Site secret and redeploy it with Version 13.
+- [x] Configure `OPENAI_API_KEY` as a production Site secret and redeploy with environment revision 3.
 - [ ] Add OpenAI API credits, then complete two production LLM LIVE runs and both guardrail runs.
 - [x] Keep the externally hosted Site public and accessible without sign-in.
 - [x] Add the intended public repository URL to `DEVPOST.md`; verify it resolves after repository creation.
