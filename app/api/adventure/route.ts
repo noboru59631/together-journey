@@ -225,6 +225,14 @@ async function extractConversation(body: unknown, apiKey: string, model: string)
       });
       if (!response.ok) {
         lastError = `LLM_HTTP_${response.status}`;
+        const failure = await response.json().catch(() => null) as { error?: { type?: unknown; code?: unknown; param?: unknown; message?: unknown } } | null;
+        console.info("together.openai_response_error", {
+          status: response.status,
+          type: typeof failure?.error?.type === "string" ? failure.error.type : null,
+          code: typeof failure?.error?.code === "string" ? failure.error.code : null,
+          param: typeof failure?.error?.param === "string" ? failure.error.param : null,
+          message: typeof failure?.error?.message === "string" ? failure.error.message.slice(0, 500) : null,
+        });
         if (response.status !== 429 && response.status < 500) break;
         continue;
       }
@@ -236,6 +244,7 @@ async function extractConversation(body: unknown, apiKey: string, model: string)
       }
       const parsed = extractionSchema.safeParse(JSON.parse(text));
       if (parsed.success) return parsed.data;
+      console.info("together.openai_schema_error", parsed.error.issues.map(issue => ({ code: issue.code, path: issue.path.join(".") })));
       lastError = "LLM_SCHEMA_INVALID";
     } catch (error) {
       lastError = error instanceof Error && error.name === "TimeoutError" ? "LLM_TIMEOUT" : "LLM_INVALID_RESPONSE";
