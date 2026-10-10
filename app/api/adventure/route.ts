@@ -323,7 +323,7 @@ function needsInput(reflections: string[], extraction: Extraction, model: string
       unresolvedEntities,
       qlooApiCalls,
       explanation: {
-        input: `${resolvedEntities.length} entity${resolvedEntities.length === 1 ? "" : "ies"} verified in Qloo Search.`,
+        input: `${resolvedEntities.length} ${resolvedEntities.length === 1 ? "entity" : "entities"} verified in Qloo Search.`,
         qloo: "Qloo Insights was not called because the verified signal set was insufficient.",
         selection: "Together stopped before recommendation selection.",
         llm: extraction.sharedSpark.summary,

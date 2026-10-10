@@ -167,6 +167,7 @@ test("wrong Qloo search match is never adopted", async () => {
   const { result, calls } = await exercise({ searchOverride: query => [{ entity_id: `wrong-${query}`, name: "Different entity", types: ["urn:entity:artist"] }] });
   assert.equal(result.mode, "NEEDS_INPUT");
   assert.equal(result.trace.resolvedEntities.length, 0);
+  assert.equal(result.trace.explanation.input, "0 entities verified in Qloo Search.");
   assert.equal(calls.some(call => call.url.pathname === "/v2/insights"), false);
 });
 
