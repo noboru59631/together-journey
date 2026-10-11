@@ -87,7 +87,7 @@ test("strict note/chip interpretation uses store false, validated enums and exac
   const result = await interpreted.interpretExperience(inputA, "fixture", "fixture");
   assert.equal(result.taste[0].tag, "atmosphere"); assert.equal(result.practical[0].dimension, "crowds");
   assert.equal(body.store, false); assert.equal(body.text.format.strict, true); assert.equal(body.text.format.schema.additionalProperties, false);
-  assert.ok(body.input[0].content.includes("do NOT infer quiet"));
+  assert.ok(body.input[0].content.includes("do NOT infer outdoors, quiet"));
   const chipModule = load("../lib/post-experience.ts", { fetch: async (_url, options) => {
     assert.match(JSON.parse(options.body).input[1].content, /Less crowded next time/);
     return { ok: true, json: async () => ({ output_text: JSON.stringify({ taste: [], practical: [{ dimension: "crowds", value: -1, evidence: "Less crowded next time" }] }) }) };
@@ -103,6 +103,24 @@ test("strict note/chip interpretation uses store false, validated enums and exac
   }
   const refused = load("../lib/post-experience.ts", { fetch: async () => ({ ok: true, json: async () => ({ status: "incomplete", output_text: JSON.stringify(signalsA) }) }) });
   await assert.rejects(refused.interpretExperience(inputA, "fixture", "fixture"));
+});
+
+test("verbatim crowd evidence cannot support an invented outdoor dislike or quiet preference", async () => {
+  const interpreted = load("../lib/post-experience.ts", { fetch: async () => ({ ok: true, json: async () => ({ output_text: JSON.stringify({
+    taste: [...signalsA.taste, { tag: "outdoors", sentiment: "negative", evidence: "it was too crowded" }],
+    practical: [...signalsA.practical, { dimension: "quiet", value: -1, evidence: "too crowded" }],
+  }) }) }) });
+  const result = await interpreted.interpretExperience(inputA, "fixture", "fixture");
+  assert.equal(result.taste.length, 1); assert.equal(result.taste[0].tag, "atmosphere");
+  assert.equal(result.practical.length, 1); assert.equal(result.practical[0].dimension, "crowds");
+  const db = database();
+  try {
+    await seed(db); await store.markExperienced(db, pairId, chapterId);
+    await store.saveExperienceReview(db, pairId, chapterId, inputA, { ...signalsA, taste: [...signalsA.taste, { tag: "outdoors", sentiment: "negative", evidence: "it was too crowded" }] }, "guarded");
+    assert.equal((await store.readMemory(db, pairId)).chapters[0].experienceReviews[0].taste.length, 1);
+    db.sqlite.prepare("INSERT INTO experience_reaction_signals VALUES (?, ?, 'A', 'grounded-cafe', 'taste', 'outdoors', 'negative', 'it was too crowded', 'post_experience', 4, '2026-10-11T01:00:00Z')").run(pairId, chapterId);
+    assert.equal((await store.readMemory(db, pairId)).chapters[0].experienceReviews[0].taste.length, 1);
+  } finally { db.sqlite.close(); }
 });
 
 test("A-only, B later, grounding, retry idempotency, edit replacement and atomic failure", async () => {

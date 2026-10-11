@@ -1,6 +1,6 @@
 import { deriveProfile, type Feedback, type MemoryChapter, type MemorySnapshot } from "./relationship-memory";
 import { preferenceProfile, type PreferenceEvidence, type PreferenceSignal } from "./practical-preferences";
-import { canExperience, experienceWeight, interpretedReviewSchema, type ExperienceReview, type InterpretedReview, type ReviewInput } from "./post-experience";
+import { canExperience, experienceWeight, interpretedReviewSchema, supportedReactionSignals, type ExperienceReview, type InterpretedReview, type ReviewInput } from "./post-experience";
 
 export const pairCookie = "together_journey";
 export const validPairId = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
@@ -13,10 +13,10 @@ export async function readMemory(database: D1Database, pairId: string): Promise<
   const chapters = result.results.map(row => ({ ...JSON.parse(row.payload) as MemoryChapter, feedback: row.feedback, reflection: row.reflection }));
   const reviews = await database.prepare("SELECT chapter_id AS chapterId, entity_id AS entityId, entity_name AS entityName, domain, person, overall, reviewed_at AS reviewedAt, source, weight FROM experience_reviews WHERE pair_id = ?").bind(pairId).all<ExperienceReview>();
   const signals = await database.prepare("SELECT chapter_id AS chapterId, person, kind, signal, value, evidence FROM experience_reaction_signals WHERE pair_id = ?").bind(pairId).all<{ chapterId: string; person: string; kind: string; signal: string; value: string; evidence: string }>();
-  for (const chapter of chapters) chapter.experienceReviews = reviews.results.filter(review => review.chapterId === chapter.id).map(review => ({ ...review, ...interpretedReviewSchema.parse({
+  for (const chapter of chapters) chapter.experienceReviews = reviews.results.filter(review => review.chapterId === chapter.id).map(review => ({ ...review, ...supportedReactionSignals(interpretedReviewSchema.parse({
     taste: signals.results.filter(signal => signal.chapterId === chapter.id && signal.person === review.person && signal.kind === "taste").map(signal => ({ tag: signal.signal, sentiment: signal.value, evidence: signal.evidence })),
     practical: signals.results.filter(signal => signal.chapterId === chapter.id && signal.person === review.person && signal.kind === "practical").map(signal => ({ dimension: signal.signal, value: Number(signal.value), evidence: signal.evidence })),
-  }) }));
+  })) }));
   const preferences = await database.prepare("SELECT dimension, value, weight, source, timestamp, chapter_id AS chapterId, entity_id AS entityId FROM practical_evidence WHERE pair_id = ?").bind(pairId).all<PreferenceEvidence>();
   const actualPreferences: PreferenceEvidence[] = chapters.filter(chapter => canExperience(chapter) && chapter.experiencedAt).flatMap(chapter => (chapter.experienceReviews ?? []).flatMap(review => review.practical.map(signal => ({ ...signal, chapterId: chapter.id, entityId: review.entityId, person: review.person, timestamp: review.reviewedAt, source: "post_experience" as const, weight: experienceWeight }))));
   return { chapters, profile: deriveProfile(chapters), practical: preferenceProfile([...preferences.results, ...actualPreferences]), asOf: new Date().toISOString(), persistence: "D1" };
@@ -38,7 +38,7 @@ export async function saveExperienceReview(database: D1Database, pairId: string,
   const snapshot = await readMemory(database, pairId);
   const chapter = snapshot.chapters.find(item => item.id === chapterId);
   if (!chapter || !canExperience(chapter) || !chapter.experiencedAt) return false;
-  const parsed = interpretedReviewSchema.parse(interpreted);
+  const parsed = supportedReactionSignals(interpretedReviewSchema.parse(interpreted));
   const timestamp = new Date().toISOString();
   const guard = "FROM pair_memories WHERE pair_id = ? AND id = ? AND json_extract(payload, '$.state') = 'LIVE' AND json_extract(payload, '$.experiencedAt') IS NOT NULL AND EXISTS (SELECT 1 FROM pair_sessions WHERE id = ? AND revoked_at IS NULL)";
   const statements = [database.prepare(`INSERT INTO experience_reviews (pair_id, chapter_id, person, entity_id, entity_name, domain, overall, input_hash, reviewed_at, source, weight) SELECT ?, ?, ?, json_extract(payload, '$.recommendation.id'), json_extract(payload, '$.recommendation.name'), COALESCE(json_extract(payload, '$.discovery.domain'), json_extract(payload, '$.recommendation.category')), ?, ?, ?, 'post_experience', ? ${guard} ON CONFLICT(pair_id, chapter_id, person) DO UPDATE SET overall = excluded.overall, input_hash = excluded.input_hash, reviewed_at = excluded.reviewed_at`).bind(pairId, chapterId, input.person, input.overall, hash, timestamp, experienceWeight, pairId, chapterId, pairId),
