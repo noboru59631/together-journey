@@ -15,14 +15,14 @@ export const discoveryDomains = [
 
 export type DiscoveryDomain = typeof discoveryDomains[number]["id"];
 export const discoveryCapabilities = [
-  ...discoveryDomains.map(domain => ({ domain: domain.id, label: domain.label, qlooType: domain.type, enabled: true, grounding: domain.type === "urn:entity:place" && domain.id !== "place" ? "Qloo place description or tags must support the category" : "Exact Qloo entity type" })),
+  ...discoveryDomains.map(domain => ({ domain: domain.id, label: domain.label, qlooType: domain.type, enabled: true, grounding: domain.type === "urn:entity:place" && domain.id !== "place" ? "Qloo-verified classification filter, primary classification tag or primary subject description" : "Exact Qloo entity type" })),
   { domain: "camping", label: "Camping", qlooType: "urn:entity:place", enabled: false, grounding: "No dedicated camping type; campground places may appear under Outdoor when metadata supports them" },
   { domain: "fishing", label: "Fishing", qlooType: "urn:entity:place", enabled: false, grounding: "No dedicated fishing type; fishing places may appear under Outdoor when metadata supports them" },
   { domain: "events", label: "Local events", qlooType: "urn:entity:place", enabled: false, grounding: "Venues can be grounded; event dates and tickets are not verified" },
   { domain: "videogame", label: "Games", qlooType: "urn:entity:videogame", enabled: false, grounding: "Documented Qloo type; discovery stays experimental until account-level live verification" },
 ];
 export type DiscoveryWhy = { known: string; new: string; fits: string };
-export type DiscoveryRecord = { domain: DiscoveryDomain; status: "suggested" | "tried" | "skipped"; sourceChapterIds: string[]; why: DiscoveryWhy; location: string };
+export type DiscoveryRecord = { domain: DiscoveryDomain; status: "suggested" | "tried" | "skipped"; sourceChapterIds: string[]; why: DiscoveryWhy; location: string; categoryEvidence?: string };
 export type DomainHistory = { domain: DiscoveryDomain; count: number; tried: number; lastSeen: string; feedback: number };
 
 export function chapterDomain(chapter: MemoryChapter): DiscoveryDomain | undefined {
@@ -74,17 +74,41 @@ export function domainDirections(profile: Pick<TasteProfile, "chapters" | "share
 
 type ClassifiedEntity = { name?: unknown; properties?: { description?: unknown }; tags?: unknown };
 
-export function fitsDomain(entity: ClassifiedEntity, domain: DiscoveryDomain): boolean {
-  if (!["food", "culture", "outdoor"].includes(domain)) return true;
-  const tags = Array.isArray(entity.tags) ? entity.tags.flatMap(tag => typeof tag === "string" ? [tag] : tag && typeof tag === "object" ? [String(tag.name ?? ""), String(tag.tag_id ?? "")] : []) : [];
-  const text = [entity.properties?.description, ...tags].filter(value => typeof value === "string").join(" ");
+export function placeClassificationTags(tags: unknown[], domain: DiscoveryDomain): string[] {
+  const kinds: Partial<Record<DiscoveryDomain, RegExp>> = {
+    food: /^(caf[eé]s?|coffee shops?|restaurants?|baker(?:y|ies)|listening bars?|jazz bars?)$/i,
+    culture: /^(?:art |history |science )?(museums?|galleries|gallery|art centers?|cultural centers?)$/i,
+    outdoor: /^(?:botanical |national |city |public |nature )?(gardens?|parks?|forests?|nature reserves?|campgrounds?|fishing lakes?|fishing piers?|hiking trails?)$/i,
+  };
+  const pattern = kinds[domain];
+  if (!pattern) return [];
+  return [...new Set(tags.flatMap(tag => {
+    const id = typeof tag === "string" ? tag : tag && typeof tag === "object" && "tag_id" in tag && typeof tag.tag_id === "string" ? tag.tag_id : "";
+    return /^urn:tag:(category|genre):place:/i.test(id) && pattern.test(id.split(":").at(-1)!.replaceAll("_", " ")) ? [id] : [];
+  }))];
+}
+
+export function domainEvidence(entity: ClassifiedEntity, domain: DiscoveryDomain): string | null {
+  if (!["food", "culture", "outdoor"].includes(domain)) return `Qloo entity type: ${discoveryDomains.find(item => item.id === domain)?.type}`;
+  const tags = Array.isArray(entity.tags) ? entity.tags.flatMap(tag => typeof tag === "string" ? [tag] : tag && typeof tag === "object" && typeof tag.tag_id === "string" ? [tag.tag_id] : []) : [];
   const patterns = {
-    food: /\b(caf[eé]|coffee|restaurant|dining|bakery|listening bar|jazz bar)(?=\W|$)/i,
-    culture: /\b(museum|gallery|art center|cultural center|exhibition)\b/i,
-    outdoor: /\b(garden|park|forest|nature reserve|hiking|campground|fishing)\b/i,
+    food: "caf[eé]|coffee shop|restaurant|bakery|listening bar|jazz bar",
+    culture: "museum|gallery|art center|cultural center",
+    outdoor: "garden|park|forest|nature reserve|campground|fishing lake|fishing pier|hiking trail",
   };
   const pattern = patterns[domain as keyof typeof patterns];
-  return [...text.matchAll(new RegExp(pattern.source, "gi"))].some(match => !/\b(not|never|no|without)\s+(?:\w+\s+){0,2}$/i.test(text.slice(0, match.index)));
+  const taxonomy = tags.filter(tag => /^urn:tag:(category|genre):place:/i.test(tag));
+  const primary = placeClassificationTags(taxonomy, domain)[0];
+  if (primary) return `Qloo classification tag: ${primary}`;
+  if (taxonomy.some(tag => /^urn:tag:category:place:/i.test(tag))) return null;
+  const description = typeof entity.properties?.description === "string" ? entity.properties.description.split(/[.!?]/)[0].trim() : "";
+  const adjectives = "quiet|tranquil|peaceful|lively|small|large|local|independent|intimate|historic|historical|modern|contemporary|beautiful|Japanese|Italian|French|botanical|public|national|outdoor|urban|popular|renowned|famous|cozy|cosy|secluded|traditional";
+  const subject = new RegExp(`^(?:.{1,100}?\\s(?:is|was)\\s+)?(?:an?\\s+|the\\s+)?(?:(?:${adjectives})[\\s-]+){0,4}(?:${pattern})(?=\\W|$)`, "i").exec(description);
+  return subject ? `Qloo primary description: ${subject[0]}` : null;
+}
+
+export function fitsDomain(entity: ClassifiedEntity, domain: DiscoveryDomain): boolean {
+  return domainEvidence(entity, domain) !== null;
 }
 
 export function nameFingerprint(name: string) {
@@ -108,9 +132,12 @@ export function repeatedCandidate(entity: { entity_id?: unknown; id?: unknown; n
 
 export function rankDiscoveries<Candidate extends PracticalCandidate & { entity: ClassifiedEntity & { entity_id?: unknown; id?: unknown } }>(candidates: Candidate[], chapters: MemoryChapter[], practical: PreferenceState[]) {
   const fresh = candidates.filter(candidate => !repeatedCandidate(candidate.entity, chapters));
-  const ranking = rerankCandidates(fresh, practical);
-  const ranked = ranking.ranked.map(item => ({ ...item, novelty: 2, familiarity: 1 / (item.index + 1), score: 3 * item.score + 2 + 1 / (item.index + 1) })).sort((first, second) => second.score - first.score || first.index - second.index);
-  return { ...ranking, ranked, excluded: candidates.length - fresh.length };
+  const practicalDomains = new Set(["food", "culture", "outdoor", "place", "destination"]);
+  const ranked = fresh.map((candidate, index) => {
+    const practicalScore = rerankCandidates([candidate], practicalDomains.has(candidate.category) ? practical : []).ranked[0];
+    return { candidate, index, contributors: practicalScore.contributors, novelty: 2, familiarity: 1 / (index + 1), score: 3 * practicalScore.score + 2 + 1 / (index + 1) };
+  }).sort((first, second) => second.score - first.score || first.index - second.index);
+  return { ranked, excluded: candidates.length - fresh.length };
 }
 
 export function discoveryWhy(direction: ReturnType<typeof domainDirections>[number], chapters: MemoryChapter[], candidate: string): DiscoveryWhy {

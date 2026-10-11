@@ -38,7 +38,7 @@ type Adventure = {
     candidateCount: number;
     knownFilteredCount: number;
     candidateCategories: Array<{ category: string; count: number; samples: string[] }>;
-    qlooApiCalls: Array<{ stage: "search" | "insights"; category: string; status: number; resultCount: number }>;
+    qlooApiCalls: Array<{ stage: "search" | "insights" | "tags"; category: string; status: number; resultCount: number }>;
     explanation: { input: string; qloo: string; selection: string; llm: string };
   };
 };

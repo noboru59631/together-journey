@@ -37,12 +37,13 @@ function database() {
   } };
 }
 
-function route(database, candidates, calls = []) {
+function route(database, candidates, calls = [], tags = []) {
   return load("../app/api/adventure/route.ts", {
     console,
     process: { env: { QLOO_API_KEY: "fixture-only", QLOO_API_BASE_URL: "https://qloo.test" } },
     fetch: async urlValue => {
       const url = new URL(urlValue); calls.push(url);
+      if (url.pathname === "/v2/tags") return { ok: true, status: 200, json: async () => ({ results: { tags } }) };
       if (url.pathname === "/v2/insights") return { ok: true, status: 200, json: async () => ({ results: { entities: candidates } }) };
       return { ok: true, status: 200, json: async () => ({ results: { entities: candidates } }) };
     },
@@ -110,6 +111,10 @@ test("unsupported categories cannot be grounded; subdomains require Qloo metadat
   for (const domain of ["camping", "fishing", "videogame", "events"]) assert.equal(dirs.some(item => item.category === domain), false);
   assert.equal(discovery.fitsDomain({ name: "Jazz café" }, "food"), false);
   assert.equal(discovery.fitsDomain({ properties: { description: "Not a restaurant" } }, "food"), false);
+  assert.equal(discovery.fitsDomain({ properties: { description: "A church with a café nearby" } }, "food"), false);
+  assert.equal(discovery.fitsDomain({ properties: { description: "A shopping building with a rooftop garden" } }, "outdoor"), false);
+  assert.equal(discovery.fitsDomain({ tags: [{ tag_id: "urn:tag:category:place:church" }], properties: { description: "A café near a church" } }, "food"), false);
+  assert.equal(discovery.fitsDomain({ tags: [{ tag_id: "urn:tag:category:place:cafe" }] }, "food"), true);
   assert.equal(discovery.fitsDomain({ properties: { description: "Quiet restaurant and café" } }, "food"), true);
   const db = database();
   try { await store.readMemory(db, pairId); await store.saveMemory(db, first); assert.equal((await route(db, []).POST(request("camping"))).status, 400); }
@@ -131,8 +136,9 @@ test("three synthetic-provider chapters vary movie → food → outdoor, survive
     assert.equal(food.value.mode, "LIVE", JSON.stringify({ reason: food.value.reason, calls: calls.map(url => url.href) })); assert.equal(food.value.id, "cafe-quiet");
     assert.ok(food.value.discovery.sourceChapterIds.includes(firstId));
     assert.match(food.value.discovery.why.new, /not received/);
-    assert.equal(calls[0].searchParams.get("filter.type"), "urn:entity:place");
-    assert.equal(calls[0].searchParams.get("signal.interests.entities"), "seed-film,seed-artist");
+    const insights = calls.find(url => url.pathname === "/v2/insights");
+    assert.equal(insights.searchParams.get("filter.type"), "urn:entity:place");
+    assert.equal(insights.searchParams.get("signal.interests.entities"), "seed-film,seed-artist");
     const count = calls.length;
     const retry = await api.POST(request("food"));
     assert.equal(retry.value.id, food.value.id); assert.equal(calls.length, count);
@@ -160,4 +166,23 @@ test("no fresh metadata-backed candidate stays FALLBACK without exploration lear
     const result = await route(db, [{ entity_id: "unclassified", name: "Possible Café", types: ["urn:entity:place"] }]).POST(request("food"));
     assert.equal(result.value.mode, "FALLBACK"); assert.equal((await store.readMemory(db, pairId)).chapters.length, 1);
   } finally { db.sqlite.close(); }
+});
+
+test("Qloo-validated place taxonomy filters the requested domain, never invented tags", async () => {
+  const db = database(); const calls = [];
+  try {
+    await store.readMemory(db, pairId); await store.saveMemory(db, chapter());
+    const tags = [{ tag_id: "urn:tag:category:place:restaurant" }, { tag_id: "urn:tag:keyword:place:restaurant" }, { tag_id: "urn:tag:category:place:church" }];
+    const result = await route(db, [{ entity_id: "restaurant", name: "Qloo taxonomy fixture", types: ["urn:entity:place"] }], calls, tags).POST(request("food"));
+    assert.equal(result.value.mode, "LIVE");
+    assert.equal(calls.find(url => url.pathname === "/v2/insights").searchParams.get("filter.tags"), "urn:tag:category:place:restaurant");
+    assert.match(result.value.discovery.categoryEvidence, /verified by/);
+    assert.equal(discovery.placeClassificationTags(tags, "outdoor").length, 0);
+  } finally { db.sqlite.close(); }
+});
+
+test("quiet scenery in a film synopsis is not practical quiet-place evidence", () => {
+  const candidate = { category: "movie", entity: { entity_id: "movie", name: "A film", properties: { description: "A quiet countryside story" } } };
+  const ranking = discovery.rankDiscoveries([candidate], [], [{ dimension: "quiet", score: -2, count: 1, weight: 2 }]);
+  assert.equal(ranking.ranked[0].score, 3); assert.equal(ranking.ranked[0].contributors.length, 0);
 });

@@ -5,7 +5,7 @@ import { pairCookie, readMemory, saveMemory, validPairId } from "../../../lib/me
 import { createChapter, deriveProfile, historicalEntities, memoryContext, memoryExplanation, type MemorySnapshot } from "../../../lib/relationship-memory";
 import { rerankCandidates } from "../../../lib/practical-preferences";
 import { enrichCandidates } from "../../../lib/practical-metadata";
-import { discoveryDomains, domainDirections, discoveryWhy, fitsDomain, rankDiscoveries, type DiscoveryRecord } from "../../../lib/discovery";
+import { discoveryDomains, domainDirections, discoveryWhy, domainEvidence, fitsDomain, placeClassificationTags, rankDiscoveries, type DiscoveryDomain, type DiscoveryRecord } from "../../../lib/discovery";
 
 export const runtime = "edge";
 
@@ -79,7 +79,7 @@ type QlooEntity = {
   properties?: { price_level?: unknown; description?: unknown; address?: unknown; geocode?: { city?: unknown; country?: unknown } };
 };
 
-type QlooApiCall = { stage: "search" | "insights"; category: string; status: number; resultCount: number };
+type QlooApiCall = { stage: "search" | "insights" | "tags"; category: string; status: number; resultCount: number };
 type ResolvedEntity = { id: string; name: string; type: string; participant: "you" | "partner"; confidence: number; provenance: "explicit" | "inferred"; why: string };
 type CandidateCategory = { category: string; count: number; samples: string[] };
 
@@ -178,7 +178,7 @@ function entitiesFrom(payload: unknown): QlooEntity[] {
   if (!payload || typeof payload !== "object") return [];
   const record = payload as Record<string, unknown>;
   const results = record.results as Record<string, unknown> | undefined;
-  const values = [results?.entities, record.entities, record.results].find(Array.isArray);
+  const values = [results?.entities, results?.tags, record.entities, record.tags, record.results].find(Array.isArray);
   return Array.isArray(values) ? values.filter((value): value is QlooEntity => Boolean(value) && typeof value === "object") : [];
 }
 
@@ -289,9 +289,13 @@ async function resolveEntity(base: string, key: string, candidate: z.infer<typeo
   return { id: entityId(match)!, name: entityName(match)!, type: candidate.type, participant, confidence: candidate.confidence, provenance: candidate.provenance, why: candidate.why };
 }
 
-async function insightCandidates(base: string, key: string, resolved: ResolvedEntity[], type: string, location: string, calls: QlooApiCall[]) {
+async function insightCandidates(base: string, key: string, resolved: ResolvedEntity[], type: string, location: string, calls: QlooApiCall[], classificationTags: string[] = []) {
   const url = new URL("/v2/insights", base);
   url.searchParams.set("filter.type", type);
+  if (classificationTags.length) {
+    url.searchParams.set("filter.tags", classificationTags.join(","));
+    url.searchParams.set("operator.filter.tags", "union");
+  }
   if (type === "urn:entity:place" && location) url.searchParams.set("filter.location.query", location);
   url.searchParams.set("signal.interests.entities", resolved.map(entity => entity.id).join(","));
   url.searchParams.set("feature.explainability", "true");
@@ -351,6 +355,21 @@ function adventureCopy(category: string, title: string): string {
   return `Make ${title} the anchor for your next shared outing, then leave room for one unplanned stop nearby.`;
 }
 
+async function classificationTags(base: string, key: string, domain: DiscoveryDomain, calls: QlooApiCall[]) {
+  const queries: Partial<Record<DiscoveryDomain, string[]>> = { food: ["cafe", "restaurant"], culture: ["museum", "gallery"], outdoor: ["park", "garden"] };
+  const found = await Promise.all((queries[domain] ?? []).map(async query => {
+    const url = new URL("/v2/tags", base);
+    url.searchParams.set("filter.query", query);
+    url.searchParams.set("take", "50");
+    try {
+      const payload = await qlooGet(url, key, calls, "tags", domain) as { results?: { tags?: unknown[] } | unknown[]; tags?: unknown[] };
+      const tags = Array.isArray(payload.results) ? payload.results : payload.results?.tags ?? payload.tags ?? [];
+      return placeClassificationTags(tags, domain);
+    } catch { return []; }
+  }));
+  return [...new Set(found.flat())].slice(0, 12);
+}
+
 async function nextDiscovery(request: NextRequest, body: Record<string, unknown>) {
   const origin = request.headers?.get("origin");
   if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
@@ -396,8 +415,9 @@ async function nextDiscovery(request: NextRequest, body: Record<string, unknown>
     const legacy = await env.DB!.prepare("SELECT entity_id, qloo_entity_id FROM experiences WHERE journey_id = ?").bind(pairId).all<{ entity_id: string; qloo_entity_id: string | null }>();
     const excluded = new Set([...signals.map(entity => entity.id), ...legacy.results.flatMap(item => [item.entity_id, item.qloo_entity_id])]);
     for (const direction of orderedDirections.slice(0, 3)) {
-      const raw = await insightCandidates(base, key, signals, direction.type, location, calls);
-      const candidates = raw.filter(entity => !excluded.has(entityId(entity)!) && fitsDomain(entity, direction.category)).map(entity => ({ entity, category: direction.category }));
+      const verifiedTags = await classificationTags(base, key, direction.category, calls);
+      const raw = await insightCandidates(base, key, signals, direction.type, location, calls, verifiedTags);
+      const candidates = raw.filter(entity => !excluded.has(entityId(entity)!) && (verifiedTags.length || fitsDomain(entity, direction.category))).map(entity => ({ entity, category: direction.category }));
       const enrichment = await enrichCandidates(candidates, { database: env.DB!, base, key });
       const ranking = rankDiscoveries(enrichment.candidates, memory.chapters, memory.practical ?? []);
       attempts.push({ domain: direction.category, score: direction.score, contributors: direction.contributors, usable: ranking.ranked.length });
@@ -405,7 +425,9 @@ async function nextDiscovery(request: NextRequest, body: Record<string, unknown>
       if (!selected) continue;
       const title = entityName(selected.entity)!;
       const why = discoveryWhy(direction, memory.chapters, title);
-      const discovery: DiscoveryRecord = { domain: direction.category, status: "suggested", sourceChapterIds: direction.sourceChapterIds, why, location };
+      const categoryEvidence = verifiedTags.length ? `Qloo Insights filter.tags: ${verifiedTags.join(", ")} (verified by /v2/tags)` : domainEvidence(selected.entity, direction.category)!;
+      if (["food", "culture", "outdoor"].includes(direction.category)) why.fits += " Qloo place classification supports this direction.";
+      const discovery: DiscoveryRecord = { domain: direction.category, status: "suggested", sourceChapterIds: direction.sourceChapterIds, why, location, categoryEvidence };
       const chapter = createChapter({ id: requestId, pairId, timestamp: new Date().toISOString(), mode: "LIVE", inputs: { you: "", partner: "" }, entities: signals, participants: [], discovery,
         recommendation: { id: entityId(selected.entity)!, name: title, category: direction.category, description: adventureCopy(direction.type.replace("urn:entity:", ""), title), place: placeLabel(selected.entity, direction.category), rationale: Object.values(why).join(" ") } });
       if (!chapter) return fallback("Your retained history needs more grounded signals.", [], null, null);
@@ -418,7 +440,7 @@ async function nextDiscovery(request: NextRequest, body: Record<string, unknown>
       }
       return respond(chapter, { qlooApiCalls: calls, candidateCount: raw.length, knownFilteredCount: raw.length - candidates.length + ranking.excluded,
         candidateCategories: [{ category: direction.category, count: raw.length, samples: candidates.slice(0, 3).map(candidate => entityName(candidate.entity)!) }],
-        discoveryRanking: { directions, attempts, candidates: ranking.ranked.map(item => ({ id: entityId(item.candidate.entity), score: item.score, familiarity: item.familiarity, novelty: item.novelty, practical: item.contributors })) }, practicalEnrichment: enrichment.trace }, selected.practical);
+        discoveryRanking: { directions, attempts, candidates: ranking.ranked.map(item => ({ id: entityId(item.candidate.entity), score: item.score, familiarity: item.familiarity, novelty: item.novelty, practical: item.contributors })) }, categoryEvidence, practicalEnrichment: enrichment.trace }, selected.practical);
     }
     return fallback("Qloo returned no fresh candidate with evidence for the selected directions.", [], null, null, { qlooApiCalls: calls });
   } catch (error) {

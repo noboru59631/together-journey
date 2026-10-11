@@ -24,13 +24,15 @@ The map in `lib/discovery.ts` follows the [official Qloo Insights entity types](
 | Movies / TV | `urn:entity:movie` / `urn:entity:tv_show` |
 | Music | `urn:entity:artist`; a listening invitation, not a fabricated concert |
 | Books | `urn:entity:book` |
-| Cafés / restaurants / food | `urn:entity:place` AND returned description/tags mentioning a café, coffee, restaurant, dining, bakery or listening/jazz bar |
-| Art / museums / culture | `urn:entity:place` AND returned museum, gallery, exhibition or cultural-center metadata |
-| Outdoor / nature | `urn:entity:place` AND returned garden, park, forest, nature reserve, hiking, campground or fishing metadata |
+| Cafés / restaurants / food | `urn:entity:place` AND Qloo-verified café/restaurant taxonomy filter or primary-category evidence |
+| Art / museums / culture | `urn:entity:place` AND Qloo-verified museum/gallery taxonomy filter or primary-category evidence |
+| Outdoor / nature | `urn:entity:place` AND Qloo-verified park/garden taxonomy filter or primary-category evidence for nature, camping or fishing places |
 | Local places | `urn:entity:place`; no event-date, opening-hours or ticket claims |
 | Travel / destinations | `urn:entity:destination` |
 
 Camping and fishing have no dedicated enabled Qloo domain. A metadata-backed campground/fishing place may appear within Outdoor; no itinerary, equipment, access or safety facts are invented. Live music can be discovered as an artist or a metadata-backed place, but scheduled performances are unverified. Games (`urn:entity:videogame`) are documented by Qloo and accepted as input signals, but stay hidden as an experimental output until live account coverage is checked. Local events are hidden as a separate output because venue grounding is not event verification. Candidate names alone do not establish place subcategories.
+
+Place subdomains first search [Qloo `/v2/tags`](https://github.com/qloo/docs-public/blob/main/reference/get-tags.md) for matching classification tags. Only returned `urn:tag:category:place:*` or `urn:tag:genre:place:*` IDs with an exact recognized primary category can be used in `filter.tags`; keyword/affinity tags and unrelated taxonomy never become classification filters. No tag ID is fabricated. If the lookup is unavailable, Together requires a returned primary classification tag or a conservative opening description identifying the place itself (for example, “A quiet café…”). A church mentioning a café nearby, or a shopping building mentioning a rooftop garden, is insufficient. Category evidence is retained with the chapter. Missing primary support fails closed. Localized or unusual descriptions may be missed until their taxonomy is supported.
 
 ### Auditable domain and novelty scoring
 
@@ -43,7 +45,7 @@ Domain score = `2 × min(shared matching tags, 3) + min(different matching tags,
 - Outdoor setting score: the existing learned setting score (−2 to +2); other domain practicality stays neutral until candidate facts exist. Unknown crowd, price or travel distance never becomes a domain fact.
 - Ties follow the declared capability-map order. Explicit Try this direction restricts discovery to that eligible domain. Automatic discovery tries at most the three highest-scoring directions; missing metadata, an empty result or a provider error never licenses an invented candidate.
 - Previously suggested IDs, known/existing experience IDs and positive seed IDs are excluded. Normalized name aliases and near duplicates (at least three words each; token Jaccard similarity ≥0.8) are also excluded across domains.
-- Fresh candidate score: `3 × existing evidence-based practical score + 2 novelty + 1/(original eligible Qloo index + 1)`. The final term retains a bounded familiarity/order preference. Novelty is rewarded only for grounded eligible candidates; practical evidence can change the winner. Unknown evidence scores zero. Ties preserve Qloo order.
+- Fresh candidate score: `3 × existing evidence-based practical score + 2 novelty + 1/(original eligible Qloo index + 1)`. The final term retains a bounded familiarity/order preference. Novelty is rewarded only for grounded eligible candidates; practical evidence can change the winner for place/destination experiences. Movie, TV, music and book synopses do not supply practical venue facts (a quiet scene is not evidence of a quiet outing). Unknown evidence scores zero. Ties preserve Qloo order.
 
 Every reveal explains **What we know about you two**, **Why this is new**, and **Why it still fits**. Explanations summarize observations and provider provenance, not hidden reasoning. Qloo supplies entities; Together supplies auditable domain/novelty decisions.
 
