@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { supportedEvidence, type PracticalMetadata } from "./practical-metadata";
 
 export const dimensions = ["quiet", "crowds", "setting", "budget", "planning", "pace"] as const;
 export type Dimension = typeof dimensions[number];
@@ -54,27 +55,30 @@ export async function interpretPreferenceNote(note: string, apiKey: string, mode
   return signals.filter(signal => signals.filter(other => other.dimension === signal.dimension).length === 1);
 }
 
-export type PracticalCandidate = { entity: { properties?: { description?: unknown } }; category: string };
-export type CandidateFact = PreferenceSignal & { evidence: string };
+export type PracticalCandidate = { entity: { properties?: { description?: unknown } }; category: string; practical?: PracticalMetadata };
+export type CandidateFact = PreferenceSignal & { evidence: string; confidence?: number };
 
 export function candidateFacts(candidate: PracticalCandidate): CandidateFact[] {
+  const metadataFacts: CandidateFact[] = [];
+  const price = candidate.practical?.price;
+  const crowd = candidate.practical?.crowd;
+  if (supportedEvidence(price) && price?.evidence_type === "verified" && price.value !== "mid-range") metadataFacts.push({ dimension: "budget", value: price!.value === "budget" ? -1 : 1, evidence: `Verified Qloo price: ${price!.value} (${price!.raw_evidence}; ${price!.evidence_source})`, confidence: price!.evidence_confidence });
+  if (supportedEvidence(crowd) && crowd?.value !== "moderate") metadataFacts.push({ dimension: "crowds", value: crowd!.value === "quieter" ? -1 : 1, evidence: `${crowd!.evidence_type === "verified" ? "Verified crowd evidence" : "Crowd hint from Qloo description (not live occupancy)"}: ${crowd!.raw_evidence}; ${crowd!.evidence_source}`, confidence: crowd!.evidence_confidence });
   const description = candidate.entity.properties?.description;
-  if (typeof description !== "string") return [];
+  if (typeof description !== "string") return metadataFacts;
   const rules: Array<[Dimension, RegExp, RegExp]> = [
     ["quiet", /\b(quiet|tranquil|peaceful|静かな)\b/i, /\b(lively|loud|bustling)\b/i],
-    ["crowds", /\b(uncrowded|less crowded)\b/i, /\b(crowded|busy|bustling)\b/i],
     ["setting", /\b(indoor|indoors)\b/i, /\b(outdoor|outdoors|open-air)\b/i],
-    ["budget", /\b(free admission|budget-friendly|affordable)\b/i, /\b(expensive|premium|luxury)\b/i],
     ["planning", /\b(walk-ins welcome|no reservation required)\b/i, /\b(reservation required|advance booking)\b/i],
     ["pace", /\b(relaxed|unhurried|seated)\b/i, /\b(hiking|walking trail|strenuous|active)\b/i],
   ];
-  return rules.flatMap(([dimension, negative, positive]) => {
+  return [...metadataFacts, ...rules.flatMap(([dimension, negative, positive]) => {
     const lower = negative.test(description), upper = positive.test(description.replace(negative, ""));
     if (lower === upper) return [];
     const match = description.match(lower ? negative : positive)!;
     if (/\b(not|never|no|without)\s+(?:\w+\s+){0,2}$/i.test(description.slice(0, match.index))) return [];
     return [{ dimension, value: lower ? -1 as const : 1 as const, evidence: `Qloo description: ${match[0]}` }];
-  });
+  })];
 }
 
 export function rerankCandidates<Candidate extends PracticalCandidate>(candidates: Candidate[], profile: PreferenceState[]) {
@@ -84,13 +88,14 @@ export function rerankCandidates<Candidate extends PracticalCandidate>(candidate
     const contributors = learned.flatMap(state => {
       const fact = facts.find(item => item.dimension === state.dimension);
       const value = fact?.value;
-      return value === undefined ? [] : [{ dimension: state.dimension, contribution: state.score * value / 2, evidence: fact!.evidence }];
+      return value === undefined ? [] : [{ dimension: state.dimension, contribution: state.score * value / 2 * (fact!.confidence ?? 1), evidence: fact!.evidence }];
     });
     return { candidate, index, score: contributors.reduce((total, item) => total + item.contribution, 0), contributors };
   });
   const ranked = [...scored].sort((first, second) => second.score - first.score || first.index - second.index);
   const changed = ranked.some((item, index) => item.index !== index);
+  const recommendationChanged = Boolean(ranked[0] && ranked[0].index !== 0);
   const supported = ranked[0]?.contributors.filter(item => item.contribution > 0) ?? [];
-  const rationale = changed && supported.length ? `You’ve been leaning toward ${supported.map(item => preferenceLabel(learned.find(state => state.dimension === item.dimension)! ).toLowerCase()).join(" and ")} experiences, so Together ranked this higher using available candidate evidence.` : "";
-  return { ranked, changed, rationale };
+  const rationale = recommendationChanged && supported.length ? `You’ve been leaning toward ${supported.map(item => preferenceLabel(learned.find(state => state.dimension === item.dimension)! ).toLowerCase()).join(" and ")} experiences, so Together ranked this higher using available candidate evidence.${supported.some(item => item.evidence.startsWith("Crowd hint")) ? " Crowd support is a description hint, not verified busy-time data." : ""}` : "";
+  return { ranked, changed, recommendationChanged, rationale };
 }

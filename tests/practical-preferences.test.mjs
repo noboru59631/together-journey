@@ -5,8 +5,12 @@ import { loadTypescript } from "./load-typescript.mjs";
 
 const filename = fileURLToPath(new URL("../lib/practical-preferences.ts", import.meta.url));
 const practical = loadTypescript(filename);
+const metadata = loadTypescript(fileURLToPath(new URL("../lib/practical-metadata.ts", import.meta.url)));
 const evidence = (dimension, value, weight = 1) => ({ dimension, value, weight, chapterId: "chapter", source: "free_text", timestamp: "2026-10-11", entityId: "qloo" });
-const candidate = (id, description) => ({ id, category: "place", entity: { properties: { description } } });
+const candidate = (id, description) => {
+  const value = { id, category: "place", entity: { entity_id: id, properties: { description } } };
+  return { ...value, practical: metadata.normalizeMetadata(value, "https://hackathon.api.qloo.com/v2/insights") };
+};
 
 test("first run has no learned practical profile", () => {
   assert.equal(practical.preferenceProfile([]).length, 0);

@@ -22,6 +22,13 @@
       "when": 1791695520540,
       "tag": "0002_crazy_fenris",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791697935822,
+      "tag": "0003_thankful_odin",
+      "breakpoints": true
     }
   ]
 }

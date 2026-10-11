@@ -1,4 +1,7 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+export const candidatePracticalMetadata = sqliteTable("candidate_practical_metadata", {
+  entityId: text("entity_id").primaryKey(), payload: text("payload").notNull(),
+});
 export const practicalEvidence = sqliteTable("practical_evidence", {
   pairId: text("pair_id").notNull(), chapterId: text("chapter_id").notNull(), entityId: text("entity_id").notNull(),
   dimension: text("dimension").notNull(), value: integer("value").notNull(), weight: integer("weight").notNull(),

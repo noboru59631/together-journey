@@ -5,6 +5,7 @@ import Image from "next/image";
 import { ArrowLeft, BookOpen, ChevronRight, Compass, Film, Heart, MapPin, MessageCircleMore, Music2, Sparkles, Users, X } from "lucide-react";
 import { FeedbackButtons, ExplorationTaste, PracticalFeedback, MemoryInvitation, MemoryTimeline, OurTaste } from "../components/relationship-memory";
 import type { PreferenceSignal } from "../lib/practical-preferences";
+import { practicalChips, type PracticalMetadata } from "../lib/practical-metadata";
 import { deriveProfile, type Feedback, type MemorySnapshot } from "../lib/relationship-memory";
 
 type View = "journey" | "taste" | "talk" | "spark" | "reveal" | "return";
@@ -20,6 +21,7 @@ type Adventure = {
   place: string;
   detail: string;
   qlooEntityId?: string;
+  practicalMetadata?: PracticalMetadata;
   mode: AdventureMode;
   reason: string;
   question?: string | null;
@@ -250,7 +252,17 @@ function TasteCircle({ side, label, title, details }: { side: "you" | "mika"; la
 
 function Reveal({ adventure, planned, saveError, onExplain, onAccept, onReject, onReturn }: { adventure: Adventure; planned: boolean; saveError: boolean; onExplain: () => void; onAccept: () => void; onReject: () => void; onReturn: () => void }) {
   const canSave = adventure.mode === "LIVE";
-  return <div className="reveal screen-enter"><article className={`adventure-card ${adventure.mode.toLowerCase().replace("_", "-")}`}>{adventure.mode === "LIVE" ? <div className="live-card-art">{adventure.category === "book" ? <BookOpen size={48}/> : adventure.category === "place" ? <MapPin size={48}/> : <Music2 size={48}/>}</div> : <Image src="/tokyo-listening-bar.png" alt="Illustration representing a prepared Together demo" fill sizes="(max-width: 850px) 100vw, 470px" priority/>}<div className="scrim"/><div className="adventure-copy"><span className="eyebrow">{adventure.eyebrow}</span><h2>{adventure.title}</h2><p>{adventure.description}</p><div className="meta"><span><MapPin size={15}/>{adventure.place}</span><span>{adventure.detail}</span></div></div><div className="status"><Sparkles size={14}/>{modeLabel(adventure.mode)}</div></article><button className="why" onClick={onExplain}><span><i><Sparkles size={15}/></i><span><strong>Why this adventure?</strong><small>See LLM, Qloo, and Together separately</small></span></span><ChevronRight size={18}/></button>{saveError && <p role="alert" className="save-error">Could not save to your Journey. Please try again.</p>}{!planned ? <div className="reveal-actions"><button onClick={onReject}>{canSave ? "Change the conversation" : "Add a clearer clue"}</button><button onClick={onAccept} disabled={!canSave}>{canSave ? "Let’s go" : "Not a live adventure"} {canSave && <ChevronRight size={18}/>}</button></div> : <div className="planned-state"><span><Sparkles size={17}/>Added to your Journey</span><button onClick={onReturn}>We went—tell you about it</button></div>}</div>;
+  return <div className="reveal screen-enter"><article className={`adventure-card ${adventure.mode.toLowerCase().replace("_", "-")}`}>{adventure.mode === "LIVE" ? <div className="live-card-art">{adventure.category === "book" ? <BookOpen size={48}/> : adventure.category === "place" ? <MapPin size={48}/> : <Music2 size={48}/>}</div> : <Image src="/tokyo-listening-bar.png" alt="Illustration representing a prepared Together demo" fill sizes="(max-width: 850px) 100vw, 470px" priority/>}<div className="scrim"/><div className="adventure-copy"><span className="eyebrow">{adventure.eyebrow}</span><h2>{adventure.title}</h2><p>{adventure.description}</p><PracticalFactChips metadata={canSave ? adventure.practicalMetadata : undefined}/><div className="meta"><span><MapPin size={15}/>{adventure.place}</span><span>{adventure.detail}</span></div></div><div className="status"><Sparkles size={14}/>{modeLabel(adventure.mode)}</div></article><button className="why" onClick={onExplain}><span><i><Sparkles size={15}/></i><span><strong>Why this adventure?</strong><small>See LLM, Qloo, and Together separately</small></span></span><ChevronRight size={18}/></button>{saveError && <p role="alert" className="save-error">Could not save to your Journey. Please try again.</p>}{!planned ? <div className="reveal-actions"><button onClick={onReject}>{canSave ? "Change the conversation" : "Add a clearer clue"}</button><button onClick={onAccept} disabled={!canSave}>{canSave ? "Let’s go" : "Not a live adventure"} {canSave && <ChevronRight size={18}/>}</button></div> : <div className="planned-state"><span><Sparkles size={17}/>Added to your Journey</span><button onClick={onReturn}>We went—tell you about it</button></div>}</div>;
+}
+
+function PracticalFactChips({ metadata }: { metadata?: PracticalMetadata }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+  const chips = practicalChips(metadata, now);
+  return chips.length ? <div className="practical-fact-chips">{chips.map(chip => <a key={chip.label} href={chip.source} title={chip.detail} target="_blank" rel="noreferrer">{chip.label}</a>)}</div> : null;
 }
 
 function Explanation({ adventure, onClose }: { adventure: Adventure; onClose: () => void }) {

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { pairCookie, readMemory, saveMemory, validPairId } from "../../../lib/memory-store";
 import { createChapter, deriveProfile, historicalEntities, memoryContext, memoryExplanation, type MemorySnapshot } from "../../../lib/relationship-memory";
 import { rerankCandidates } from "../../../lib/practical-preferences";
+import { enrichCandidates } from "../../../lib/practical-metadata";
 
 export const runtime = "edge";
 
@@ -72,7 +73,7 @@ type QlooEntity = {
   type?: unknown;
   subtype?: unknown;
   types?: unknown;
-  properties?: { description?: unknown; address?: unknown; geocode?: { city?: unknown; country?: unknown } };
+  properties?: { price_level?: unknown; description?: unknown; address?: unknown; geocode?: { city?: unknown; country?: unknown } };
 };
 
 type QlooApiCall = { stage: "search" | "insights"; category: string; status: number; resultCount: number };
@@ -447,7 +448,8 @@ export async function POST(request: NextRequest) {
     const preferred = ordered.filter(candidate => !discouraged.has(candidate.category));
     const unexplored = new Set(memory.profile.unexplored.map(opportunity => opportunity.category));
     const baseline = [...preferred.filter(candidate => unexplored.has(candidate.category)), ...preferred.filter(candidate => !unexplored.has(candidate.category)), ...ordered.filter(candidate => discouraged.has(candidate.category))];
-    const practicalRanking = rerankCandidates(baseline, memory.practical ?? []);
+    const enrichment = await enrichCandidates(baseline, { database: env.DB, base, key: qlooKey });
+    const practicalRanking = rerankCandidates(enrichment.candidates, memory.practical ?? []);
     const selected = practicalRanking.ranked[0]?.candidate;
     if (!selected) return fallback(available.length ? "Every Qloo candidate is already in this Journey." : "Qloo returned no usable cross-domain candidate.", reflections, extraction, model, { resolvedEntities, unresolvedEntities, candidateCategories, qlooApiCalls });
 
@@ -476,6 +478,7 @@ export async function POST(request: NextRequest) {
       place: placeLabel(selected.entity, selected.category),
       detail: `Qloo ${selected.category} · reveal one, experience together`,
       mode: "LIVE",
+      practicalMetadata: selected.practical,
       reason: "Only Qloo-verified input entities were used. Qloo supplied the candidate; Together applied history and practicality rules, then wrote the invitation copy.",
       question: null,
       memory: { saved: memorySaved, chapterId: memorySaved ? chapter?.id : null, priorChapters: memory.chapters.length, explanation: rememberedWhy, persistence: memorySaved ? "D1" : "unavailable", profile: deriveProfile(memorySaved && chapter ? [chapter, ...memory.chapters].slice(0, 100) : memory.chapters) },
@@ -489,7 +492,8 @@ export async function POST(request: NextRequest) {
         candidateCount: candidateCategories.reduce((total, category) => total + category.count, 0),
         knownFilteredCount,
         candidateCategories,
-        practicalRanking: { changed: practicalRanking.changed, candidates: practicalRanking.ranked.map(item => ({ id: entityId(item.candidate.entity), name: entityName(item.candidate.entity), originalIndex: item.index, score: item.score, contributors: item.contributors })) },
+        practicalEnrichment: enrichment.trace,
+        practicalRanking: { changed: practicalRanking.changed, recommendationChanged: practicalRanking.recommendationChanged, candidates: practicalRanking.ranked.map(item => ({ id: entityId(item.candidate.entity), name: entityName(item.candidate.entity), originalIndex: item.index, score: item.score, contributors: item.contributors, practicalMetadata: item.candidate.practical })) },
         qlooApiCalls,
         explanation: {
           input: `Qloo Search verified ${sourceSummary}.`,
