@@ -28,7 +28,7 @@ test("strict Responses interpretation parses crowded to quieter signals without 
   let sent;
   const interpreted = loadTypescript(filename, { fetch: async (_, options) => {
     sent = JSON.parse(options.body);
-    return { ok: true, json: async () => ({ output: [{ content: [{ type: "output_text", text: JSON.stringify({ signals: [{ dimension: "crowds", value: -1 }, { dimension: "quiet", value: -1 }] }) }] }] }) };
+    return { ok: true, json: async () => ({ output: [{ content: [{ type: "output_text", text: JSON.stringify({ signals: [{ preference: "less_crowded" }, { preference: "quieter" }] }) }] }] }) };
   } });
   const signals = await interpreted.interpretPreferenceNote("We liked it, but it was too crowded. More quiet places next time.", "mock", "test-model");
   assert.equal(JSON.stringify(signals), JSON.stringify([{ dimension: "crowds", value: -1 }, { dimension: "quiet", value: -1 }]));

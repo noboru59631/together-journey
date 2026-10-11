@@ -47,7 +47,7 @@ test("feedback endpoint interprets a note atomically and persists supported prac
   let fail = false;
   const route = loadTypescript(fileURLToPath(new URL("../app/api/memory/route.ts", import.meta.url)), {
     process: { env: { OPENAI_API_KEY: "mock", OPENAI_MODEL: "mock-model" } },
-    fetch: async () => ({ ok: !fail, json: async () => ({ output_text: JSON.stringify({ signals: [{ dimension: "crowds", value: -1 }, { dimension: "quiet", value: -1 }] }) }) }),
+    fetch: async () => ({ ok: !fail, json: async () => ({ output_text: JSON.stringify({ signals: [{ preference: "less_crowded" }, { preference: "quieter" }] }) }) }),
     require: name => name === "cloudflare:workers" ? { env: { DB: db } } : name === "next/server" ? { NextResponse: { json: (value, init = {}) => ({ value, status: init.status ?? 200, cookies: { set() {} } }) } } : name === "zod" ? { z } : null,
   });
   try {
