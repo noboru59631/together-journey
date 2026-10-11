@@ -1,4 +1,17 @@
 import { index, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+export const pairSessions = sqliteTable("pair_sessions", {
+  id: text("id").primaryKey(),
+  createdAt: text("created_at").notNull(),
+  revokedAt: text("revoked_at"),
+});
+export const pairMemories = sqliteTable("pair_memories", {
+  id: text("id").primaryKey(),
+  pairId: text("pair_id").notNull(),
+  createdAt: text("created_at").notNull(),
+  payload: text("payload").notNull(),
+  feedback: text("feedback"),
+  reflection: text("reflection").notNull().default(""),
+}, table => [index("idx_pair_memories_time").on(table.pairId, table.createdAt)]);
 export const users=sqliteTable("users",{id:text("id").primaryKey(),displayName:text("display_name").notNull()});
 export const journeys=sqliteTable("journeys",{id:text("id").primaryKey(),userIds:text("user_ids").notNull(),createdAt:text("created_at").notNull()});
 export const experiences=sqliteTable("experiences",{id:text("id").primaryKey(),journeyId:text("journey_id").notNull(),entityId:text("entity_id").notNull(),qlooEntityId:text("qloo_entity_id"),title:text("title").notNull(),type:text("type").notNull(),reaction:text("reaction").notNull(),reflection:text("reflection").notNull().default(""),culturalSignals:text("cultural_signals").notNull().default("[]"),emotionalSignals:text("emotional_signals").notNull().default("[]"),withWhom:text("with_whom"),discoveredFrom:text("discovered_from"),experiencedAt:text("experienced_at").notNull()},table=>[uniqueIndex("idx_experiences_journey_entity").on(table.journeyId,table.entityId),index("idx_experiences_journey_time").on(table.journeyId,table.experiencedAt)]);

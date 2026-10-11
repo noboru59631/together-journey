@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { ArrowLeft, BookOpen, ChevronRight, Compass, Film, Heart, MapPin, MessageCircleMore, Music2, Sparkles, Users, X } from "lucide-react";
+import { FeedbackButtons, MemoryInvitation, MemoryTimeline, OurTaste } from "../components/relationship-memory";
+import { deriveProfile, type Feedback, type MemorySnapshot } from "../lib/relationship-memory";
 
-type View = "journey" | "talk" | "spark" | "reveal" | "return";
+type View = "journey" | "taste" | "talk" | "spark" | "reveal" | "return";
 type Participant = { id: "you" | "partner"; label: string; likes: string[]; dislikes: string[]; emotionalContext: string[]; entities: Array<{ name: string; type: string; why: string; confidence: number; provenance: "explicit" | "inferred" }> };
 type Extraction = { experience: { title: string; category: string }; participants: Participant[]; sharedSpark: { title: string; summary: string }; location: { query: string; provenance: "explicit" | "none" }; confidence: number };
 type AdventureMode = "LIVE" | "DEMO" | "FALLBACK" | "NEEDS_INPUT";
@@ -20,6 +22,7 @@ type Adventure = {
   mode: AdventureMode;
   reason: string;
   question?: string | null;
+  memory?: { saved: boolean; chapterId: string | null; priorChapters: number; explanation: string; persistence: string };
   trace: {
     reflections: string[];
     extraction: Extraction | null;
@@ -84,13 +87,59 @@ export default function Home() {
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [formError, setFormError] = useState("");
+  const [memory, setMemory] = useState<MemorySnapshot | null>(null);
+  const [memoryBusy, setMemoryBusy] = useState(false);
+  const [memoryError, setMemoryError] = useState("");
+
+  const refreshMemory = useCallback(async () => {
+    try {
+      const response = await fetch("/api/memory", { cache: "no-store" });
+      setMemory(await response.json());
+      if (!response.ok) setMemoryError("Memory is temporarily unavailable. No new learning is being claimed.");
+    } catch { setMemoryError("Could not load your memory. Please try again."); }
+  }, []);
+
+  useEffect(() => {
+    const lifecycle = new AbortController();
+    void fetch("/api/memory", { cache: "no-store", signal: lifecycle.signal }).then(async response => {
+      const result: MemorySnapshot = await response.json();
+      if (!lifecycle.signal.aborted) {
+        setMemory(result);
+        if (!response.ok) setMemoryError("Memory is temporarily unavailable. No new learning is being claimed.");
+      }
+    }).catch(() => { if (!lifecycle.signal.aborted) { setMemory({ chapters: [], profile: deriveProfile([]), persistence: "unavailable" }); setMemoryError("Could not load your memory. Please try again."); } });
+    return () => lifecycle.abort();
+  }, []);
+
+  const feedbackMemory = useCallback(async (chapterId: string, feedback: Feedback, reflection?: string) => {
+    setMemoryBusy(true); setMemoryError("");
+    try {
+      const response = await fetch("/api/memory", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ chapterId, feedback, reflection }) });
+      if (!response.ok) throw new Error("Feedback unavailable");
+      setMemory(await response.json());
+      return true;
+    } catch { setMemoryError("Could not save feedback. Please try again."); return false; }
+    finally { setMemoryBusy(false); }
+  }, []);
+
+  const resetMemory = useCallback(async () => {
+    setMemoryBusy(true); setMemoryError("");
+    try {
+      const response = await fetch("/api/memory", { method: "DELETE" });
+      if (!response.ok) throw new Error("Reset unavailable");
+      setMemory(await response.json()); setAdventure(demoAdventure); setPlanned(false); setSaved(false); setNote(""); setReaction(null); setView("journey");
+    } catch { setMemoryError("Could not reset your Journey. Your memory is still here; please try again."); }
+    finally { setMemoryBusy(false); }
+  }, []);
 
   const findAdventure = useCallback(async () => {
+    if (loading || memoryBusy) return;
+    if (!memory) { setFormError("Your Journey memory is still loading. Please try again in a moment."); return; }
     if (!conversation.experienceTitle.trim() || conversation.you.trim().length < 8 || conversation.partner.trim().length < 8) {
       setFormError("Add the shared experience and a short reflection from both people.");
       return;
     }
-    setFormError(""); setLoading(true); setPlanned(false); setSaved(false); setSaveError(false); setView("spark");
+    setFormError(""); setMemoryError(""); setLoading(true); setPlanned(false); setSaved(false); setSaveError(false); setNote(""); setReaction(null); setView("spark");
     try {
       const response = await fetch("/api/adventure", {
         method: "POST",
@@ -105,16 +154,25 @@ export default function Home() {
         }),
       });
       if (!response.ok) throw new Error("Unavailable");
-      setAdventure(await response.json());
+      const result: Adventure = await response.json();
+      setAdventure(result);
+      if (result.memory?.saved) await refreshMemory();
+      else if (result.mode === "LIVE") setMemoryError("This grounded reveal was not saved. Your taste memory has not changed.");
     } catch {
       setAdventure({ ...demoAdventure, mode: "FALLBACK", reason: "The adventure service is unavailable. No live recommendation is being claimed." });
     } finally {
       setLoading(false);
     }
-  }, [conversation]);
+  }, [conversation, loading, memoryBusy, memory, refreshMemory]);
 
   const saveJourney = useCallback(async (nextReaction = "planned") => {
     setSaved(false); setSaveError(false);
+    if (adventure.mode !== "LIVE") return;
+    if (nextReaction !== "planned" && adventure.memory?.chapterId) {
+      const feedback: Feedback = nextReaction === "Loved it" || nextReaction === "Good" ? "liked" : nextReaction === "Never again" ? "not_for_us" : "neutral";
+      const result = await feedbackMemory(adventure.memory.chapterId, feedback, note);
+      setSaved(result); setSaveError(!result); return;
+    }
     try {
       const emotionalSignals = adventure.trace.extraction?.participants.flatMap(participant => participant.emotionalContext) ?? [];
       const response = await fetch("/api/journey", {
@@ -128,17 +186,17 @@ export default function Home() {
       if (!response.ok) throw new Error("Journey save failed");
       setPlanned(true); setSaved(true);
     } catch { setSaveError(true); }
-  }, [adventure, conversation.experienceTitle, conversation.partnerName, note]);
+  }, [adventure, conversation.experienceTitle, conversation.partnerName, note, feedbackMemory]);
 
   useEffect(() => {
     const context = document.modelContext;
     if (!context?.registerTool) return;
     const lifecycle = new AbortController();
-    void Promise.resolve(context.registerTool({ name: "reveal_next_adventure", title: "Reveal the next adventure", description: "Use the current shared reflections to reveal one culturally grounded next adventure.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, untrustedContentHint: false }, execute: async () => { await findAdventure(); return { status: "revealed" }; } }, { signal: lifecycle.signal })).catch(() => undefined);
+    void Promise.resolve(context.registerTool({ name: "reveal_next_adventure", title: "Reveal the next adventure", description: "Use the current shared reflections to reveal one culturally grounded next adventure.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: false, untrustedContentHint: false }, execute: async () => { await findAdventure(); return { status: "revealed" }; } }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, [findAdventure]);
 
-  const titles: Record<View, string> = { journey: "Our Journey", talk: "Talk", spark: "Shared Spark", reveal: "Next Adventure", return: "After" };
+  const titles: Record<View, string> = { journey: "Our Journey", taste: "Our Taste", talk: "Talk", spark: "Shared Spark", reveal: "Next Adventure", return: "After" };
   return <main className="app-shell">
     <div className="aurora one"/><div className="aurora two"/>
     <section className="phone-stage" aria-label="Together journey app">
@@ -148,25 +206,27 @@ export default function Home() {
         <span className={`mode-pill ${loading ? "checking" : adventure.mode.toLowerCase().replace("_", "-")}`}><i/>{loading ? "LISTENING" : adventure.mode === "NEEDS_INPUT" ? "MORE INPUT" : adventure.mode}</span>
       </header>
       <div className="screen-frame">
-        {view === "journey" && <Journey planned={planned} adventureTitle={adventure.title} onTalk={() => setView("talk")}/>}
-        {view === "talk" && <Talk value={conversation} setValue={setConversation} error={formError} onContinue={findAdventure}/>}
+        {memoryError && <p role="alert" className="save-error memory-notice">{memoryError}</p>}
+        {view === "journey" && <><Journey planned={planned} adventureTitle={adventure.title} onTalk={() => setView("talk")} count={memory?.chapters.length ?? 0}/><div className="memory-surfaces"><button className="secondary-action full" onClick={() => setView("taste")}>Our Taste · {memory?.profile.chapters ?? 0} chapters</button><MemoryTimeline memory={memory} busy={memoryBusy || loading} onFeedback={feedbackMemory} onReset={resetMemory}/></div></>}
+        {view === "taste" && <div className="memory-surfaces screen-enter"><OurTaste memory={memory}/><MemoryInvitation count={memory?.profile.chapters ?? 0} onTalk={() => setView("talk")}/></div>}
+        {view === "talk" && <><p className="memory-disclosure">Grounded reveals remember both reflections in your anonymous Journey. Reset our journey deletes them. Avoid sensitive personal information.</p><Talk value={conversation} setValue={setConversation} error={formError} onContinue={findAdventure}/></>}
         {view === "spark" && <SharedSpark adventure={adventure} loading={loading} onContinue={() => setView("reveal")} onBack={() => setView("talk")}/>}
-        {view === "reveal" && <Reveal adventure={adventure} planned={planned} saveError={saveError} onExplain={() => setExplainOpen(true)} onAccept={() => saveJourney()} onReject={() => setView("talk")} onReturn={() => { setSaved(false); setView("return"); }}/>}
+        {view === "reveal" && <>{adventure.memory && <p className="memory-why">{adventure.memory.explanation}</p>}<Reveal adventure={adventure} planned={planned} saveError={saveError} onExplain={() => setExplainOpen(true)} onAccept={() => saveJourney()} onReject={() => setView("talk")} onReturn={() => { setSaved(false); setView("return"); }}/>{adventure.memory?.saved && adventure.memory.chapterId && <div className="memory-surfaces"><p>Does this next adventure feel right? <small>Optional</small></p><FeedbackButtons value={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onChange={feedback => feedbackMemory(adventure.memory!.chapterId!, feedback)}/></div>}</>}
         {view === "return" && <ReturnView adventure={adventure} note={note} setNote={setNote} reaction={reaction} setReaction={setReaction} saved={saved} saveError={saveError} onSave={() => reaction && saveJourney(reaction)} onJourney={() => setView("journey")}/>}
       </div>
       <nav className="bottom-nav" aria-label="Primary navigation">
         <button className={view === "journey" ? "active" : ""} onClick={() => setView("journey")}><Compass size={21}/><span>Journey</span></button>
-        <button className={view === "talk" ? "active" : ""} onClick={() => setView("talk")}><b><MessageCircleMore size={23}/></b><span>Talk</span></button>
+        <button className={view === "taste" ? "active" : ""} onClick={() => setView("taste")}><b><Heart size={23}/></b><span>Our Taste</span></button>
         <button className={view === "reveal" ? "active" : ""} onClick={() => setView("reveal")}><Sparkles size={21}/><span>Adventure</span></button>
       </nav>
     </section>
-    <aside className="desktop-story"><span className="overline">QLOO AGENTIC HACKATHON</span><h1>Don&apos;t show recommendations. <em>Reveal adventures.</em></h1><p>Two real reflections become verified cultural signals—and one thing worth doing together.</p><div/><small>AI adds a chapter to an existing relationship. It never replaces the person beside you.</small></aside>
+    <aside className="desktop-story"><span className="overline">QLOO AGENTIC HACKATHON</span><h1>Don&apos;t show recommendations. <em>Reveal adventures.</em></h1><p>Together remembers how two people experience things differently—and uses that memory to choose what they should discover next.</p><div/><small>AI adds a chapter to an existing relationship. It never replaces the person beside you.</small></aside>
     {explainOpen && <Explanation adventure={adventure} onClose={() => setExplainOpen(false)}/>}
   </main>;
 }
 
-function Journey({ planned, adventureTitle, onTalk }: { planned: boolean; adventureTitle: string; onTalk: () => void }) {
-  return <div className="journey screen-enter"><div className="journey-intro"><div><span className="eyebrow">YOU + SOMEONE YOU CARE ABOUT</span><h2>One conversation away from somewhere new.</h2></div><div className="avatars"><span>Y</span><span>+</span></div></div><div className="constellation"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M21 73 C31 63 36 61 45 55 S61 45 69 39 S78 27 84 18"/><path className="ghost" d="M45 55 C50 72 68 76 88 64"/></svg>{nodes.map(node => { const Icon = node.icon; const isPlanned = node.unknown && planned; return <div key={node.label} className={`node ${node.active ? "active" : ""} ${node.unknown ? "unknown" : ""} ${isPlanned ? "planned" : ""}`} style={{ left: `${node.x}%`, top: `${node.y}%` }}><span><Icon size={node.unknown ? 18 : 15}/></span><small>{isPlanned ? adventureTitle : node.label}</small></div>; })}<i>What should we experience next?</i></div><div className="partner-card"><span><Sparkles size={18}/></span><div><b>YOUR AI JOURNEY PARTNER</b><p>{planned ? "It’s on your map. Come back with the story only the two of you can tell." : "Start with one thing you both experienced. Different reactions are the useful part."}</p></div></div><button className="primary-action full journey-start" onClick={onTalk}><MessageCircleMore size={18}/>Share what stayed with you</button></div>;
+function Journey({ planned, adventureTitle, onTalk, count }: { planned: boolean; adventureTitle: string; onTalk: () => void; count: number }) {
+  return <div className={`journey screen-enter ${count ? "has-memory" : ""}`}><div className="journey-intro"><div><span className="eyebrow">YOU + SOMEONE YOU CARE ABOUT</span><h2>{count ? "A little more us, with every chapter." : "One conversation away from somewhere new."}</h2></div><div className="avatars"><span>Y</span><span>+</span></div></div><p className="memory-promise">Together learns how two people experience the world together.</p><div className="constellation"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M21 73 C31 63 36 61 45 55 S61 45 69 39 S78 27 84 18"/><path className="ghost" d="M45 55 C50 72 68 76 88 64"/></svg>{nodes.map(node => { const Icon = node.icon; const isPlanned = node.unknown && planned; return <div key={node.label} className={`node ${node.active ? "active" : ""} ${node.unknown ? "unknown" : ""} ${isPlanned ? "planned" : ""}`} style={{ left: `${node.x}%`, top: `${node.y}%` }}><span><Icon size={node.unknown ? 18 : 15}/></span><small>{isPlanned ? adventureTitle : node.label}</small></div>; })}<i>{count ? `${count} grounded chapters · still discovering` : "What should we experience next?"}</i></div><MemoryInvitation count={count} onTalk={onTalk}/><button className="primary-action full journey-start" onClick={onTalk}><MessageCircleMore size={18}/>What should we try next?</button></div>;
 }
 
 function Talk({ value, setValue, error, onContinue }: { value: Conversation; setValue: (value: Conversation) => void; error: string; onContinue: () => void }) {
@@ -180,7 +240,7 @@ function SharedSpark({ adventure, loading, onContinue, onBack }: { adventure: Ad
   const you = extraction?.participants.find(participant => participant.id === "you");
   const partner = extraction?.participants.find(participant => participant.id === "partner");
   const fallbackTitle = adventure.mode === "DEMO" ? "Demo only" : adventure.mode === "FALLBACK" ? "Live path unavailable" : "More signal needed";
-  return <div className="spark screen-enter"><Heading eyebrow={adventure.mode === "LIVE" ? "SAME MOMENT · DIFFERENT DOORS" : "HONEST MODE"} title={extraction?.sharedSpark.title ?? fallbackTitle} text={extraction?.sharedSpark.summary ?? adventure.reason}/><div className="venn"><TasteCircle side="you" label={you?.label ?? "YOU"} title={you?.likes[0] ?? "Your edge"} details={[...(you?.emotionalContext ?? []), ...(you?.likes.slice(1) ?? [])]}/><TasteCircle side="mika" label={partner?.label ?? "PARTNER"} title={partner?.likes[0] ?? "Their edge"} details={[...(partner?.emotionalContext ?? []), ...(partner?.likes.slice(1) ?? [])]}/><div className="shared"><Sparkles size={19}/><strong>{extraction?.sharedSpark.title ?? "No invented match"}</strong><small>{adventure.trace.extractionMode === "LIVE" ? `${Math.round((extraction?.confidence ?? 0) * 100)}% extraction confidence` : "prepared mode"}</small></div></div><div className="spark-insight"><span><Heart size={17}/></span><p>{adventure.mode === "LIVE" ? <><strong>{adventure.trace.resolvedEntities.length} cultural entities</strong> were verified in Qloo before the reveal.</> : adventure.question ?? "No live recommendation is being claimed."}</p></div><div className="spark-actions"><button className="secondary-action" onClick={onBack}>Add detail</button><button className="primary-action" onClick={onContinue}>{adventure.mode === "NEEDS_INPUT" ? "See what is missing" : "Reveal one adventure"}</button></div><p className="privacy"><Users size={14}/>Built from this conversation—not an identity profile.</p></div>;
+  return <div className="spark screen-enter"><Heading eyebrow={adventure.mode === "LIVE" ? "SAME MOMENT · DIFFERENT DOORS" : "HONEST MODE"} title={extraction?.sharedSpark.title ?? fallbackTitle} text={extraction?.sharedSpark.summary ?? adventure.reason}/><div className="venn"><TasteCircle side="you" label={you?.label ?? "YOU"} title={you?.likes[0] ?? "Your edge"} details={[...(you?.emotionalContext ?? []), ...(you?.likes.slice(1) ?? [])]}/><TasteCircle side="mika" label={partner?.label ?? "PARTNER"} title={partner?.likes[0] ?? "Their edge"} details={[...(partner?.emotionalContext ?? []), ...(partner?.likes.slice(1) ?? [])]}/><div className="shared"><Sparkles size={19}/><strong>{extraction?.sharedSpark.title ?? "No invented match"}</strong><small>{adventure.trace.extractionMode === "LIVE" ? `${Math.round((extraction?.confidence ?? 0) * 100)}% extraction confidence` : "prepared mode"}</small></div></div><div className="spark-insight"><span><Heart size={17}/></span><p>{adventure.mode === "LIVE" ? <><strong>{adventure.trace.resolvedEntities.length} cultural entities</strong> were verified in Qloo before the reveal.</> : adventure.question ?? "No live recommendation is being claimed."}</p></div><div className="spark-actions"><button className="secondary-action" onClick={onBack}>Add detail</button><button className="primary-action" onClick={onContinue}>{adventure.mode === "NEEDS_INPUT" ? "See what is missing" : "Reveal one adventure"}</button></div><p className="privacy"><Users size={14}/>Your reflections shape your private pair memory. Reset it anytime.</p></div>;
 }
 
 function TasteCircle({ side, label, title, details }: { side: "you" | "mika"; label: string; title: string; details: string[] }) {

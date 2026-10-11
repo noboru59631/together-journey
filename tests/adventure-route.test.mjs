@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { webcrypto } from "node:crypto";
+import { loadTypescript } from "./load-typescript.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const requireRepository = createRequire(path.join(repository, "package.json"));
@@ -77,21 +79,34 @@ async function exercise({
   history = [],
   database = true,
   historyFailure = false,
+  memoryHistory = [],
+  memorySaveFailure = false,
 } = {}) {
   const calls = [];
   const exports = {};
   let llmAttempts = 0;
-  const databaseMock = { prepare: () => ({ bind: () => ({ all: async () => {
+  const stored = [];
+  const databaseMock = { batch: async statements => Promise.all(statements.map(statement => statement.run())), prepare: sql => ({ bind: (...values) => ({
+    run: async () => {
+      if (sql.startsWith("INSERT INTO pair_memories")) {
+        if (memorySaveFailure) throw new Error("save failed");
+        stored.push(JSON.parse(values[3]));
+      }
+      return { meta: { changes: 1 } };
+    },
+    first: async () => ({ revoked_at: null }),
+    all: async () => {
     if (historyFailure) throw new Error("history failed");
-    return { results: history };
+    return { results: sql.includes("pair_memories") ? memoryHistory.map(chapter => ({ payload: JSON.stringify(chapter), feedback: chapter.feedback, reflection: chapter.reflection })) : history };
   } }) }) };
   const context = vm.createContext({
-    exports, URL, AbortSignal, Error, JSON, Set, Promise,
+    exports, URL, AbortSignal, Error, JSON, Set, Promise, Date, crypto: webcrypto,
     process: { env: { ...(openAiKey ? { OPENAI_API_KEY: openAiKey } : {}), ...(qlooKey ? { QLOO_API_KEY: qlooKey } : {}), QLOO_API_BASE_URL: "https://qloo.test" } },
     require: moduleName => {
       if (moduleName === "cloudflare:workers") return { env: { DB: database ? databaseMock : undefined } };
-      if (moduleName === "next/server") return { NextResponse: { json: (value, init = {}) => ({ status: init.status ?? 200, json: async () => value }) } };
+      if (moduleName === "next/server") return { NextResponse: { json: (value, init = {}) => ({ status: init.status ?? 200, cookies: { set() {} }, json: async () => value }) } };
       if (moduleName === "zod") return requireRepository("zod");
+      if (moduleName.startsWith("../../../lib/")) return loadTypescript(path.resolve(repository, "app/api/adventure", `${moduleName}.ts`));
       throw new Error(`Unexpected test import: ${moduleName}`);
     },
     fetch: async (urlValue, options) => {
@@ -124,7 +139,7 @@ async function exercise({
   const result = await response.json();
   assert.equal(JSON.stringify(result).includes("openai-test-sentinel"), false);
   assert.equal(JSON.stringify(result).includes("qloo-test-sentinel"), false);
-  return { result, calls, response, llmAttempts };
+  return { result, calls, response, llmAttempts, stored };
 }
 
 test("missing LLM key is DEMO and does not claim free-form understanding", async () => {
@@ -239,4 +254,70 @@ test("malformed input is rejected before external requests", async () => {
   const { response, calls } = await exercise({ requestBody: { reflections: [] } });
   assert.equal(response.status, 400);
   assert.equal(calls.length, 0);
+});
+
+test("first grounded reveal records both reflections and separate entity reactions", async () => {
+  const { result, stored, calls } = await exercise();
+  assert.equal(result.memory.saved, true);
+  assert.equal(result.memory.priorChapters, 0);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].inputs.you, body.reflections[0].text);
+  assert.equal(stored[0].inputs.partner, body.reflections[1].text);
+  assert.equal(stored[0].entities[0].id, "movie-mononoke");
+  assert.equal(stored[0].reactions.length, 2);
+  const context = JSON.parse(calls[0].options.body).input[1].content;
+  assert.equal(JSON.parse(context).relationshipMemory.chapterCount, 0);
+});
+
+test("two-run demonstration extends profile, supplies prior context and excludes prior reveal", async () => {
+  const first = await exercise();
+  const second = await exercise({ requestBody: secondBody, extractionResult: secondExtraction, memoryHistory: first.stored, placeCandidates: [place, nextPlace] });
+  assert.equal(second.result.mode, "LIVE");
+  assert.equal(second.result.memory.priorChapters, 1);
+  assert.equal(second.result.id, "place-museum");
+  const context = JSON.parse(JSON.parse(second.calls[0].options.body).input[1].content).relationshipMemory;
+  assert.equal(context.chapterCount, 1);
+  assert.ok(context.different.you.includes("ancient forests"));
+  assert.ok(context.different.partner.includes("orchestral music"));
+  assert.match(second.result.memory.explanation, /ancient forests.*orchestral music/);
+  const insight = second.calls.find(call => call.url.pathname === "/v2/insights");
+  assert.match(insight.url.searchParams.get("signal.interests.entities"), /movie-mononoke/);
+  assert.equal(second.result.memory.profile.chapters, 2);
+  assert.notEqual(JSON.stringify(first.result.memory.profile), JSON.stringify(second.result.memory.profile));
+});
+
+test("NEEDS_INPUT and demo do not write successful memory", async () => {
+  for (const options of [{ openAiKey: "" }, { searchOverride: () => [] }, { emptyInsights: true }]) {
+    const { stored, result } = await exercise(options);
+    assert.equal(stored.length, 0);
+    assert.notEqual(result.mode, "LIVE");
+  }
+});
+
+test("a valid grounded reveal stays honest when its memory write fails", async () => {
+  const { result, stored } = await exercise({ memorySaveFailure: true });
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.memory.saved, false);
+  assert.equal(result.memory.chapterId, null);
+  assert.equal(result.memory.profile.chapters, 0);
+  assert.equal(stored.length, 0);
+});
+
+test("same entity retains both people's edges without relaxing the distinct-ID gate", async () => {
+  const same = structuredClone(extraction);
+  same.participants[1].entities = structuredClone(same.participants[0].entities);
+  const { result, stored } = await exercise({ extractionResult: same });
+  assert.equal(result.mode, "NEEDS_INPUT");
+  assert.equal(result.trace.resolvedEntities.length, 2);
+  assert.equal(stored.length, 0);
+});
+
+test("Not for us removes old interests from positive Qloo signals and changes category preference", async () => {
+  const first = await exercise();
+  first.stored[0].feedback = "not_for_us";
+  const second = await exercise({ requestBody: secondBody, extractionResult: secondExtraction, memoryHistory: first.stored, placeCandidates: [nextPlace] });
+  const insight = second.calls.find(call => call.url.pathname === "/v2/insights");
+  assert.equal(insight.url.searchParams.get("signal.interests.entities").includes("movie-mononoke"), false);
+  assert.notEqual(second.result.category, "place");
+  assert.match(second.result.memory.explanation, /Not for us/);
 });

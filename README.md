@@ -20,6 +20,46 @@ The first screen leads directly into this flow. It is not a dashboard, ranking, 
 
 ## Architecture
 
+## Relationship Memory — Together learns how two people experience the world together.
+
+Every successful **LIVE grounded reveal** now creates a chapter automatically. A reveal is a recommendation, not proof that you visited. Each chapter remembers a random anonymous pair/session ID, timestamp, both original reflections, Qloo-resolved IDs/names/types, per-person interpreted tags and dislikes, the grounded recommendation, rationale, result state, and optional feedback/reflection. DEMO, FALLBACK and NEEDS_INPUT never create learned chapters. The first run has no invented history.
+
+Three small surfaces keep the existing Together design:
+
+- **Our Journey**: recent grounded reveals, remembered reflections, optional feedback, and Reset our journey.
+- **Our Taste**: Shared, Different and Unexplored, with chapter counts showing accumulated evidence.
+- **What should we try next?**: the existing conversation/reveal flow, with an explicit explanation of how earlier signals guided discovery.
+
+OpenAI interprets the current reflections into short reusable tags using the same Responses API and strict Structured Outputs. `lib/relationship-memory.ts` updates the profile deterministically: normalize/deduplicate tags per person and chapter; Shared requires the same tag from both people in a chapter; Different preserves each person's other emphasis; counts are distinct supporting chapters, not compatibility percentages. Unexplored is a fixed list of supported cultural domains absent from grounded inputs or positively confirmed recommendations. It describes opportunities, not inferred likes or verified venues. Different signals are not treated as disagreement. The JSON reaction edges retain Person → Entity → Tags; the derived buckets retain Pair → Signals with chapter IDs for audit.
+
+Before the next extraction, the server loads memory from D1 and supplies a bounded summary of shared/different signals, unexplored domains, dislikes, previous recommendations and feedback. Historical tags are context, never evidence for invented current reactions. Qloo Insights receives current verified IDs plus up to six previously grounded input IDs, excluding chapters marked Not for us. Together excludes every retained prior recommendation and current input ID, prefers an unexplored domain within practical candidates, and deprioritizes rejected categories. Only a real Qloo candidate can be revealed. A deterministic memory explanation appears above the reveal and in its audit trace. Qloo provides grounding and cross-domain candidates; **Together implements relationship memory locally**.
+
+Optional feedback is **This feels like us** (`liked`), **Interesting, but unexpected** (`neutral`), or **Not for us** (`not_for_us`). Liked confirms the recommendation domain as explored; neutral records uncertainty without inventing positive tags; Not for us stops that chapter's inputs from being reused as positive historical Qloo signals and deprioritizes its recommendation category. Input reflections remain evidence of the person's actual interests even when the generated recommendation was rejected. Feedback replaces the previous choice; it never increments evidence counts by itself.
+
+### Storage, privacy and reset
+
+The existing platform-native **Cloudflare D1 `DB` binding** stores `pair_sessions` and `pair_memories`. There is no external database, additional secret or Supabase setup. Migration `drizzle/0001_dizzy_iron_lad.sql` adds tables without altering existing data; Sites applies pending migrations during deployment. Only the newest 100 chapters per pair are retained and used for the profile. The timeline shows the newest eight. Evidence counts describe this retained window.
+
+Memory survives reloads and server restarts in production. Pair access uses the existing random HttpOnly, SameSite=Lax cookie, Secure in production, renewed for 90 days. Both people use the same browser/session; changing partner names does not create a new pair. Reset before using Together with someone else. No login recovery or cross-device linking is included. Cookie expiry does not automatically delete server records; reset is the deletion mechanism. No secrets are stored in chapters. Original reflections are sent to OpenAI (`store: false`); the memory summary is also sent on repeat use. Qloo Search receives candidate names and types; Insights receives grounded IDs and an optional city.
+
+**Reset our journey** confirms deletion, removes this pair's V2 chapters and legacy experiences/connections in one D1 batch, revokes the old session, and rotates its cookie. Revocation blocks in-flight V2 saves from recreating deleted chapters. The revoked random session ID and timestamps remain as a deletion tombstone; all taste/reflection payloads are removed. Data is scoped by the server cookie, never a client-provided pair ID. Memory responses are not cached. A failed write explicitly shows that the LIVE reveal was not saved; a failed read produces honest FALLBACK. Storage outages do not create an in-memory substitute presented as durable history. Missing OpenAI credentials still produce the existing DEMO with no learning.
+
+For local/demo use, existing DEMO works with no secrets. To test durable memory locally, first build, then apply the schema to the **local** D1 binding (never use `--remote`):
+
+```bash
+npm run build
+npx wrangler d1 migrations apply DB --local --config wrangler.local.json --persist-to .wrangler/state
+npm start
+```
+
+Use the existing environment variables only: `OPENAI_API_KEY`, `OPENAI_MODEL`, `QLOO_API_KEY`, `QLOO_API_BASE_URL`. Enter their values in ignored local configuration or the Site's secret settings; never in chat. The table schema and Drizzle journal are tracked; production keys and user memory are not.
+
+### V2 verification
+
+`npm test` exercises no-history behavior, successful automatic memory, no learning for NEEDS_INPUT/DEMO/FALLBACK, second-run prior extraction context and Qloo signals, profile evolution, duplicate entities, feedback influence, pair isolation, deletion and in-flight-save revocation. The storage tests execute the actual migrations and SQL against SQLite, not a simulated map. Route tests use synthetic provider fixtures and do not claim live Qloo results.
+
+The repeat-use fixture starts with Princess Mononoke / Joe Hisaishi, then extends to Norwegian Wood / Blue Bottle Coffee. The second run includes earlier nature/music reactions in its context, filters the first recommendation, adds literary/café signals to Our Taste, and references prior differences in its explanation. Run `npm test`, `npm run lint`, `npm run typecheck`, and `npm run build` before deployment.
+
 ### Conversation Engine
 
 The server calls the OpenAI Responses API with Structured Outputs and a strict JSON Schema. The result includes:
@@ -116,4 +156,4 @@ LIVE release acceptance requires two previously unregistered conversations to co
 
 Conversation text is sent server-side to the configured LLM provider for extraction. Only verified Qloo entity IDs are sent to Qloo Insights. API keys remain server-side. Saved reactions and optional reflections remain in D1 for the anonymous browser Journey cookie, which is HttpOnly, Secure in production, SameSite Lax, and expires after 90 days.
 
-Do not enter sensitive personal information. The MVP has no account recovery, cross-device sharing, deletion UI, moderation, or production-grade rate limiting. It intentionally has no stranger matching, social feed, taste score, leaderboard, or multi-result recommendation grid.
+Do not enter sensitive personal information. Reset our journey deletes the anonymous pair's stored taste history (see the V2 storage section). The MVP has no account recovery, cross-device sharing, moderation, or production-grade rate limiting. It intentionally has no stranger matching, social feed, taste score, leaderboard, or multi-result recommendation grid.
