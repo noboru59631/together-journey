@@ -146,6 +146,17 @@ test("crowds and quiet stay distinct, and old one-off taste stops influencing di
   assert.equal(memory.discoveryTasteProfile([old]).different.you.length, 0);
 });
 
+test("stable baseline retains a small candidate contribution when recent nuance weakens it", () => {
+  const stableAndContext = [chapter(1, stable("quiet")), chapter(2, context("Quiet was better tonight.", "quiet")), chapter(3, context("Busy was fun this time.", "crowds", 1)), chapter(4, context("Lively was fun this time.", "quiet", 1))];
+  const value = derive(stableAndContext);
+  const profile = layers.layeredPracticalProfile(value);
+  const quiet = profile.find(item => item.dimension === "quiet");
+  assert.ok(Math.abs(quiet.score) < 0.5 && quiet.score < 0);
+  assert.ok(value.longTerm.some(item => item.signal === "quiet"));
+  assert.equal(winner(value), "quiet");
+  assert.ok(practical.rerankCandidates(candidates, profile).ranked[0].contributors.some(item => item.dimension === "quiet" && item.contribution > 0));
+});
+
 function database() {
   const sqlite = new DatabaseSync(":memory:");
   for (const migration of JSON.parse(readFileSync(new URL("../drizzle/meta/_journal.json", import.meta.url), "utf8")).entries) sqlite.exec(readFileSync(new URL(`../drizzle/${migration.tag}.sql`, import.meta.url), "utf8"));

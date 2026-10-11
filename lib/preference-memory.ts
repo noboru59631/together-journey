@@ -68,7 +68,7 @@ export function layeredPracticalProfile(memory: PreferenceMemory, prior: Prefere
     const temporary = Math.max(-1.5, Math.min(1.5, recent.reduce((total, item) => total + item.direction * item.modifierWeight * memoryPolicy.recentScale, 0) / Math.max(1, new Set(recent.map(item => item.person)).size)));
     const original = prior.find(item => item.dimension === dimension);
     const score = Math.max(-2, Math.min(2, baseline + temporary + (original ? original.score * 0.25 : 0)));
-    return stable.length || recent.length || original ? [{ dimension, score, count: stable.reduce((total, item) => total + item.occurrenceCount, 0) + recent.length + (original?.count ?? 0), weight: stable.reduce((total, item) => total + item.netWeight, 0) + recent.reduce((total, item) => total + item.modifierWeight, 0) + (original?.weight ?? 0) }] : [];
+    return stable.length || recent.length || original ? [{ dimension, score, layer: "stable_context" as const, count: stable.reduce((total, item) => total + item.occurrenceCount, 0) + recent.length + (original?.count ?? 0), weight: stable.reduce((total, item) => total + item.netWeight, 0) + recent.reduce((total, item) => total + item.modifierWeight, 0) + (original?.weight ?? 0) }] : [];
   });
 }
 
