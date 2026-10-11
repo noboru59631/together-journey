@@ -119,7 +119,8 @@ test("auditable derivation preserves same-world different-reasons and deduplicat
   assert.equal(profile.shared[0].count, 1);
   assert.equal(profile.different.you.find(signal => signal.tag === "nature").count, 1);
   assert.ok(profile.different.partner.some(signal => signal.tag === "music"));
-  assert.ok(profile.unexplored.some(opportunity => opportunity.category === "place"));
+  assert.equal(profile.unexplored.some(opportunity => opportunity.category === "place"), false);
+  assert.ok(profile.unexplored.some(opportunity => opportunity.category === "food"));
   assert.equal(profile.unexplored.some(opportunity => opportunity.category === "movie"), false);
   assert.ok(profile.avoided.includes("you: crowds"));
   assert.match(memory.memoryExplanation([first], "place"), /both responded to atmosphere.*nature.*emotion/);

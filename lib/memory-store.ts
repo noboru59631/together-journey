@@ -11,7 +11,7 @@ export async function readMemory(database: D1Database, pairId: string): Promise<
   const result = await database.prepare("SELECT payload, feedback, reflection FROM pair_memories WHERE pair_id = ? ORDER BY created_at DESC, id DESC LIMIT 100").bind(pairId).all<{ payload: string; feedback: Feedback | null; reflection: string }>();
   const chapters = result.results.map(row => ({ ...JSON.parse(row.payload) as MemoryChapter, feedback: row.feedback, reflection: row.reflection }));
   const preferences = await database.prepare("SELECT dimension, value, weight, source, timestamp, chapter_id AS chapterId, entity_id AS entityId FROM practical_evidence WHERE pair_id = ?").bind(pairId).all<PreferenceEvidence>();
-  return { chapters, profile: deriveProfile(chapters), practical: preferenceProfile(preferences.results), persistence: "D1" };
+  return { chapters, profile: deriveProfile(chapters), practical: preferenceProfile(preferences.results), asOf: new Date().toISOString(), persistence: "D1" };
 }
 
 export async function saveMemory(database: D1Database, chapter: MemoryChapter) {
@@ -22,8 +22,9 @@ export async function saveMemory(database: D1Database, chapter: MemoryChapter) {
   if (!result.meta.changes) throw new Error("Pair session ended");
 }
 
-export async function updateFeedback(database: D1Database, pairId: string, chapterId: string, feedback: Feedback, reflection?: string, signals: Array<PreferenceSignal & { source: PreferenceEvidence["source"] }> = []) {
+export async function updateFeedback(database: D1Database, pairId: string, chapterId: string, feedback: Feedback, reflection?: string, signals: Array<PreferenceSignal & { source: PreferenceEvidence["source"] }> = [], status?: "suggested" | "tried" | "skipped") {
   const statements = [database.prepare("UPDATE pair_memories SET feedback = ?, reflection = COALESCE(?, reflection) WHERE pair_id = ? AND id = ? AND json_extract(payload, '$.state') = 'LIVE' AND EXISTS (SELECT 1 FROM pair_sessions WHERE id = ? AND revoked_at IS NULL)").bind(feedback, reflection ?? null, pairId, chapterId, pairId)];
+  if (status) statements.push(database.prepare("UPDATE pair_memories SET payload = json_set(payload, '$.discovery.status', ?) WHERE pair_id = ? AND id = ? AND json_extract(payload, '$.discovery.domain') IS NOT NULL AND EXISTS (SELECT 1 FROM pair_sessions WHERE id = ? AND revoked_at IS NULL)").bind(status, pairId, chapterId, pairId));
   if (reflection !== undefined) statements.push(database.prepare("DELETE FROM practical_evidence WHERE pair_id = ? AND chapter_id = ? AND source = 'free_text'").bind(pairId, chapterId));
   for (const signal of signals) statements.push(database.prepare("INSERT INTO practical_evidence (pair_id, chapter_id, entity_id, dimension, value, weight, source, timestamp) SELECT ?, ?, json_extract(payload, '$.recommendation.id'), ?, ?, ?, ?, ? FROM pair_memories WHERE pair_id = ? AND id = ? AND json_extract(payload, '$.state') = 'LIVE' AND EXISTS (SELECT 1 FROM pair_sessions WHERE id = ? AND revoked_at IS NULL) ON CONFLICT(pair_id, chapter_id, dimension, source) DO UPDATE SET value = excluded.value, weight = excluded.weight, timestamp = excluded.timestamp").bind(pairId, chapterId, signal.dimension, signal.value, signal.source === "explicit_chip" ? 2 : 1, signal.source, new Date().toISOString(), pairId, chapterId, pairId));
   const [result] = await database.batch(statements);

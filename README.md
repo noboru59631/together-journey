@@ -5,14 +5,64 @@
 - Public demo: https://together-journey-qloo.crypto5555111.chatgpt.site/
 - Public source: https://github.com/noboru59631/together-journey
 
+## Together is a continuous discovery engine for two people.
+
+Together helps two people discover what to watch, listen to, eat, visit, or experience next — based on how their shared taste evolves over time.
+
+**Discovery subscription for two people** describes the feeling, not a billing product. The loop is **Experience → React → Learn → Discover → Experience Again**. There are no payments, notifications, followers, tokens or gamification.
+
+The calm existing Journey now leads with **Next Discovery**: resume the latest saved suggestion, discover the next chapter, or **Surprise us**. A chapter created in the last seven days is labeled “This week’s discovery”; older chapters are labeled “Your latest discovery”. Nothing is scheduled or generated while the app is closed. Empty profiles lead to both people's first real reflections, not a fabricated recommendation. The server reuses earlier verified interests for repeat discovery without inventing new reflections or inflating taste-tag counts. New reflections continue through the existing strict OpenAI Responses extraction and Qloo exact-match Search pipeline.
+
+**Our Taste → Unexplored** now lists only supported directions with matching prior Shared or Different tags, supporting chapter IDs, and a **Try this direction** action. These are plausible directions, not confirmed preferences or promises of candidate availability. A subcategory does not become a LIVE reveal until Qloo returns a matching place. Grounded input domains already present in the pair's interests are not called unexplored. Rejected chapters are not positive discovery evidence.
+
+### Capability map
+
+The map in `lib/discovery.ts` follows the [official Qloo Insights entity types](https://github.com/qloo/docs-public/blob/main/reference/insights-api-deep-dive.md). Account coverage can still produce no candidates; Together reports FALLBACK without recording a discovery.
+
+| Direction enabled for discovery | Qloo grounding |
+| --- | --- |
+| Movies / TV | `urn:entity:movie` / `urn:entity:tv_show` |
+| Music | `urn:entity:artist`; a listening invitation, not a fabricated concert |
+| Books | `urn:entity:book` |
+| Cafés / restaurants / food | `urn:entity:place` AND returned description/tags mentioning a café, coffee, restaurant, dining, bakery or listening/jazz bar |
+| Art / museums / culture | `urn:entity:place` AND returned museum, gallery, exhibition or cultural-center metadata |
+| Outdoor / nature | `urn:entity:place` AND returned garden, park, forest, nature reserve, hiking, campground or fishing metadata |
+| Local places | `urn:entity:place`; no event-date, opening-hours or ticket claims |
+| Travel / destinations | `urn:entity:destination` |
+
+Camping and fishing have no dedicated enabled Qloo domain. A metadata-backed campground/fishing place may appear within Outdoor; no itinerary, equipment, access or safety facts are invented. Live music can be discovered as an artist or a metadata-backed place, but scheduled performances are unverified. Games (`urn:entity:videogame`) are documented by Qloo and accepted as input signals, but stay hidden as an experimental output until live account coverage is checked. Local events are hidden as a separate output because venue grounding is not event verification. Candidate names alone do not establish place subcategories.
+
+### Auditable domain and novelty scoring
+
+Next Discovery chooses a domain **before** requesting Qloo candidates. Every eligible direction needs a matching tag from an earlier non-rejected LIVE chapter and at least two distinct grounded IDs representing both people. Direction cue mappings, source chapters and score contributors are visible in the response trace. Cues route discovery; they do not assert that a venue has those attributes. Qloo Insights then provides the actual cross-domain connection using verified entity IDs.
+
+Domain score = `2 × min(shared matching tags, 3) + min(different matching tags, 3) + unexplored bonus − 2 × min(previous recommendations in domain, 5) − 4 × min(current same-domain streak, 3) + mean domain feedback + practical setting score`.
+
+- Unexplored bonus: 3, or 5 for Surprise us; zero for already grounded input domains or previous recommendation domains.
+- Domain feedback: Feels like us +1, Good surprise +2, Not for us −4, legacy neutral 0. Each chapter contributes its latest choice once.
+- Outdoor setting score: the existing learned setting score (−2 to +2); other domain practicality stays neutral until candidate facts exist. Unknown crowd, price or travel distance never becomes a domain fact.
+- Ties follow the declared capability-map order. Explicit Try this direction restricts discovery to that eligible domain. Automatic discovery tries at most the three highest-scoring directions; missing metadata, an empty result or a provider error never licenses an invented candidate.
+- Previously suggested IDs, known/existing experience IDs and positive seed IDs are excluded. Normalized name aliases and near duplicates (at least three words each; token Jaccard similarity ≥0.8) are also excluded across domains.
+- Fresh candidate score: `3 × existing evidence-based practical score + 2 novelty + 1/(original eligible Qloo index + 1)`. The final term retains a bounded familiarity/order preference. Novelty is rewarded only for grounded eligible candidates; practical evidence can change the winner. Unknown evidence scores zero. Ties preserve Qloo order.
+
+Every reveal explains **What we know about you two**, **Why this is new**, and **Why it still fits**. Explanations summarize observations and provider provenance, not hidden reasoning. Qloo supplies entities; Together supplies auditable domain/novelty decisions.
+
+### Durable discovery loop
+
+Chapter JSON adds optional `discovery`: domain, status (`suggested`, `tried`, `skipped`), source chapter IDs, three-part rationale and explicit location. Existing chapters remain readable; legacy categories map to supported domain history. Counts, last-seen timestamps and mean reactions are derived from unique LIVE chapters in D1, avoiding duplicate counter tables. Migration `0004_discovery_history.sql` adds an expression index without rewriting rows. Reset deletes all pair chapters and practical evidence, so cross-domain counts and timestamps also reset; shared practical metadata cache remains independent.
+
+The browser generates one request UUID per deliberate discovery action. Retrying the same UUID returns the already saved chapter; duplicate concurrent writes resolve to that stored chapter. Feedback replaces rather than appends reactions. “We went” records tried explicitly; Not for us records skipped, without treating a suggestion as a visit. DEMO, NEEDS_INPUT, FALLBACK and failed saves never update discovery history. The retained history window is 100 chapters; novelty and counts are bounded to that window. There is no cross-device pair recovery yet.
+
+`tests/discovery.test.mjs` covers empty profiles, supported evidence paths, novelty, repetition/streak penalties, unsupported domains, practical/feedback adaptation, a three-chapter **synthetic-provider** movie → café → outdoor flow, retry idempotency, real SQLite migration/roundtrip and reset. These tests are not live Qloo verification. Production verification results should be reported separately, with actual provider status and saved IDs.
+
 ## Product flow
 
 1. Name a shared film, meal, concert, book, place, show, or podcast.
 2. Each person writes what stayed with them, including likes, dislikes, and emotional context.
 3. The Conversation Engine extracts a strict, typed taste-signal object.
 4. Every proposed cultural entity is searched in Qloo. Only an exact normalized name, expected type, and real Qloo ID can become a signal.
-5. Qloo Insights expands the verified inputs into places, books, and destinations.
-6. Together removes previously proposed or experienced IDs, applies a practicality preference, and reveals exactly one adventure.
+5. On the first conversation, Qloo Insights expands verified inputs into places, books and destinations. On repeat Next Discovery, Together selects an evidence-backed domain first, then queries Qloo in that domain.
+6. Together removes previously proposed or experienced IDs, applies evidence-backed practical and novelty scores, and reveals exactly one discovery.
 7. “Why this adventure?” separates the LLM interpretation, verified Qloo input entities, Qloo's cross-domain result, and Together's own selection/copy.
 8. Afterward, a reaction and optional reflection are saved to the browser's anonymous D1-backed Journey.
 
@@ -30,11 +80,11 @@ Three small surfaces keep the existing Together design:
 - **Our Taste**: Shared, Different and Unexplored, with chapter counts showing accumulated evidence.
 - **What should we try next?**: the existing conversation/reveal flow, with an explicit explanation of how earlier signals guided discovery.
 
-OpenAI interprets the current reflections into short reusable tags using the same Responses API and strict Structured Outputs. `lib/relationship-memory.ts` updates the profile deterministically: normalize/deduplicate tags per person and chapter; Shared requires the same tag from both people's grounded reflections, including across different chapters; its evidence count is the union of supporting chapter IDs; Different preserves each person's other emphasis; counts are distinct supporting chapters, not compatibility percentages. Unexplored is a fixed list of supported cultural domains absent from grounded inputs or positively confirmed recommendations. It describes opportunities, not inferred likes or verified venues. Different signals are not treated as disagreement. The JSON reaction edges retain Person → Entity → Tags; the derived buckets retain Pair → Signals with chapter IDs for audit.
+OpenAI interprets current reflections into short reusable tags using Responses API strict Structured Outputs. `lib/relationship-memory.ts` normalizes and deduplicates tags per person and chapter. Shared requires the same tag from both people's grounded reflections, including across different chapters; its evidence count is the union of supporting chapter IDs. Different preserves each person's other emphasis. Counts are distinct supporting chapters, not compatibility percentages. Unexplored now uses the evidence-backed capability directions described above. Different signals are not treated as disagreement. JSON reaction edges retain Person → Entity → Tags, and derived buckets retain Pair → Signals with chapter IDs for audit.
 
-Before the next extraction, the server loads memory from D1 and supplies a bounded summary of shared/different signals, unexplored domains, dislikes, previous recommendations and feedback. Historical tags are context, never evidence for invented current reactions. Qloo Insights receives current verified IDs plus up to six previously grounded input IDs, excluding chapters marked Not for us. Together excludes every retained prior recommendation and current input ID, prefers an unexplored domain within practical candidates, and deprioritizes rejected categories. Only a real Qloo candidate can be revealed. A deterministic memory explanation appears above the reveal and in its audit trace. Qloo provides grounding and cross-domain candidates; **Together implements relationship memory locally**.
+Before a new reflection extraction, the server loads D1 memory and supplies a bounded summary of shared/different signals, unexplored domains, dislikes, previous recommendations and feedback. Historical tags are context, never evidence for invented current reactions. The conversation path uses current verified IDs plus up to six earlier grounded input IDs, excluding Not for us chapters; it excludes prior recommendations, applies practical evidence, and deprioritizes rejected categories. Next Discovery instead selects a domain from prior evidence before requesting candidates, using the scoring above. Only a real Qloo candidate can be revealed. Qloo provides grounding and cross-domain candidates; **Together implements relationship memory locally**.
 
-Optional feedback is **This feels like us** (`liked`), **Interesting, but unexpected** (`neutral`), or **Not for us** (`not_for_us`). Liked confirms the recommendation domain as explored; neutral records uncertainty without inventing positive tags; Not for us stops that chapter's inputs from being reused as positive historical Qloo signals and deprioritizes its recommendation category. Input reflections remain evidence of the person's actual interests even when the generated recommendation was rejected. Feedback replaces the previous choice; it never increments evidence counts by itself.
+Optional reactions are **Feels like us** (`liked`), **Good surprise** (`good_surprise`), and **Not for us** (`not_for_us`); earlier neutral records remain readable. Each LIVE suggestion counts as a discovery, separately from tried status. Not for us stops its chapter's inputs from being reused as positive historical Qloo signals and penalizes the recommendation domain. Input reflections remain actual-interest evidence in Shared/Different even when a recommendation was rejected. Feedback replaces the previous choice and never increments evidence counts by itself.
 
 ### Storage, privacy and reset
 

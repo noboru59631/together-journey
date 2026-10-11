@@ -5,6 +5,7 @@ import { pairCookie, readMemory, saveMemory, validPairId } from "../../../lib/me
 import { createChapter, deriveProfile, historicalEntities, memoryContext, memoryExplanation, type MemorySnapshot } from "../../../lib/relationship-memory";
 import { rerankCandidates } from "../../../lib/practical-preferences";
 import { enrichCandidates } from "../../../lib/practical-metadata";
+import { discoveryDomains, domainDirections, discoveryWhy, fitsDomain, rankDiscoveries, type DiscoveryRecord } from "../../../lib/discovery";
 
 export const runtime = "edge";
 
@@ -17,6 +18,7 @@ const qlooTypes = [
   "urn:entity:place",
   "urn:entity:destination",
   "urn:entity:brand",
+  "urn:entity:videogame",
 ] as const;
 
 const experienceQlooTypes: Partial<Record<string, typeof qlooTypes[number]>> = {
@@ -67,6 +69,7 @@ const extractionSchema = z.object({
 type Extraction = z.infer<typeof extractionSchema>;
 
 type QlooEntity = {
+  tags?: unknown;
   entity_id?: unknown;
   id?: unknown;
   name?: unknown;
@@ -341,9 +344,87 @@ function cleanString(value: unknown, max: number): string {
 }
 
 function adventureCopy(category: string, title: string): string {
+  if (category === "movie" || category === "tv_show") return `Watch ${title} together, then trade the scene that stayed with each of you.`;
+  if (category === "artist") return `Listen to ${title} together and each choose one track to talk about.`;
   if (category === "book") return `Pick up ${title}, read the first chapter somewhere unhurried, then swap the line each of you underlined.`;
   if (category === "destination") return `Keep ${title} as the destination for a future day you plan together—one neighborhood, one meal, one story to bring home.`;
   return `Make ${title} the anchor for your next shared outing, then leave room for one unplanned stop nearby.`;
+}
+
+async function nextDiscovery(request: NextRequest, body: Record<string, unknown>) {
+  const origin = request.headers?.get("origin");
+  if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
+  const existingPair = request.cookies.get(pairCookie)?.value;
+  const pairId = validPairId(existingPair) ? existingPair : crypto.randomUUID();
+  const requestId = validPairId(body.requestId) ? body.requestId : crypto.randomUUID();
+  let memory: MemorySnapshot;
+  try {
+    if (!env.DB) throw new Error("Storage unavailable");
+    memory = await readMemory(env.DB, pairId);
+  } catch { return fallback("Journey history is unavailable.", [], null, null); }
+  const directions = domainDirections(memory.profile, memory.chapters, memory.practical ?? [], body.surprise === true);
+  if (!directions.length) return NextResponse.json({ ...demo, mode: "NEEDS_INPUT", id: "needs-first-chapter", title: "Start with something real", description: "Share one experience and both reflections first. Your verified interests will open the next direction.", reason: "There is no usable grounded pair history yet.", question: "What did you each enjoy in a film, song, book or place?" });
+  const requested = cleanString(body.domain, 40);
+  if (requested && !directions.some(direction => direction.category === requested)) return NextResponse.json({ error: "This direction has no supported evidence path for your pair." }, { status: 400 });
+  const respond = (chapter: NonNullable<ReturnType<typeof createChapter>>, trace: Record<string, unknown> = {}, practicalMetadata?: unknown) => {
+    const recommendation = chapter.recommendation;
+    const explanation = chapter.discovery ? Object.values(chapter.discovery.why).join(" ") : recommendation.rationale;
+    const response = NextResponse.json({
+      id: recommendation.id, qlooEntityId: recommendation.id, title: recommendation.name, category: recommendation.category,
+      domain: chapter.discovery?.domain, discovery: chapter.discovery, eyebrow: "YOUR NEXT DISCOVERY", description: recommendation.description,
+      place: recommendation.place, detail: "A grounded next chapter · experience together", mode: "LIVE", practicalMetadata,
+      reason: "Qloo supplied this candidate for verified pair interests. Together chose the domain and applied novelty and practical evidence.", question: null,
+      memory: { saved: true, chapterId: chapter.id, priorChapters: memory.chapters.filter(item => item.id !== chapter.id).length, explanation, persistence: "D1" },
+      trace: { ...demo.trace, resolvedEntities: chapter.entities, extractionMode: "LIVE", ...trace,
+        explanation: { input: "Previously exact-matched Qloo interests from both people were reused, without inventing new reflections.", qloo: `A Qloo Insights candidate in ${recommendation.category}.`, selection: explanation, llm: "This repeat discovery reuses earlier structured taste signals; no new LLM interpretation is claimed." } },
+    }, { headers: { "Cache-Control": "no-store" } });
+    response.cookies.set(pairCookie, pairId, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 90 });
+    return response;
+  };
+  const existing = memory.chapters.find(chapter => chapter.id === requestId);
+  if (existing) return respond(existing);
+  const key = process.env.QLOO_API_KEY;
+  if (!key) return fallback("Qloo is not configured.", [], null, null);
+  const signals = historicalEntities(memory.chapters);
+  if (new Set(signals.map(entity => entity.id)).size < 2 || new Set(signals.map(entity => entity.participant)).size < 2) return NextResponse.json({ ...demo, mode: "NEEDS_INPUT", reason: "Your retained signals need a verified interest from each person.", title: "One more cultural clue" });
+  const location = cleanString(body.location, 100) || memory.chapters.find(chapter => chapter.discovery?.location)?.discovery?.location || "";
+  const calls: QlooApiCall[] = [];
+  const attempts: Array<{ domain: string; score: number; contributors: unknown; usable: number }> = [];
+  const base = process.env.QLOO_API_BASE_URL ?? "https://hackathon.api.qloo.com";
+  const orderedDirections = requested ? directions.filter(direction => direction.category === requested) : directions;
+  try {
+    const legacy = await env.DB!.prepare("SELECT entity_id, qloo_entity_id FROM experiences WHERE journey_id = ?").bind(pairId).all<{ entity_id: string; qloo_entity_id: string | null }>();
+    const excluded = new Set([...signals.map(entity => entity.id), ...legacy.results.flatMap(item => [item.entity_id, item.qloo_entity_id])]);
+    for (const direction of orderedDirections.slice(0, 3)) {
+      const raw = await insightCandidates(base, key, signals, direction.type, location, calls);
+      const candidates = raw.filter(entity => !excluded.has(entityId(entity)!) && fitsDomain(entity, direction.category)).map(entity => ({ entity, category: direction.category }));
+      const enrichment = await enrichCandidates(candidates, { database: env.DB!, base, key });
+      const ranking = rankDiscoveries(enrichment.candidates, memory.chapters, memory.practical ?? []);
+      attempts.push({ domain: direction.category, score: direction.score, contributors: direction.contributors, usable: ranking.ranked.length });
+      const selected = ranking.ranked[0]?.candidate;
+      if (!selected) continue;
+      const title = entityName(selected.entity)!;
+      const why = discoveryWhy(direction, memory.chapters, title);
+      const discovery: DiscoveryRecord = { domain: direction.category, status: "suggested", sourceChapterIds: direction.sourceChapterIds, why, location };
+      const chapter = createChapter({ id: requestId, pairId, timestamp: new Date().toISOString(), mode: "LIVE", inputs: { you: "", partner: "" }, entities: signals, participants: [], discovery,
+        recommendation: { id: entityId(selected.entity)!, name: title, category: direction.category, description: adventureCopy(direction.type.replace("urn:entity:", ""), title), place: placeLabel(selected.entity, direction.category), rationale: Object.values(why).join(" ") } });
+      if (!chapter) return fallback("Your retained history needs more grounded signals.", [], null, null);
+      try { await saveMemory(env.DB!, chapter); }
+      catch {
+        const latest = await readMemory(env.DB!, pairId);
+        const retried = latest.chapters.find(item => item.id === requestId);
+        if (retried) return respond(retried);
+        return fallback("The discovery could not be saved.", [], null, null);
+      }
+      return respond(chapter, { qlooApiCalls: calls, candidateCount: raw.length, knownFilteredCount: raw.length - candidates.length + ranking.excluded,
+        candidateCategories: [{ category: direction.category, count: raw.length, samples: candidates.slice(0, 3).map(candidate => entityName(candidate.entity)!) }],
+        discoveryRanking: { directions, attempts, candidates: ranking.ranked.map(item => ({ id: entityId(item.candidate.entity), score: item.score, familiarity: item.familiarity, novelty: item.novelty, practical: item.contributors })) }, practicalEnrichment: enrichment.trace }, selected.practical);
+    }
+    return fallback("Qloo returned no fresh candidate with evidence for the selected directions.", [], null, null, { qlooApiCalls: calls });
+  } catch (error) {
+    console.info("together.discovery_error", { message: error instanceof Error ? error.message.slice(0, 160) : "Unknown failure" });
+    return fallback("The grounded discovery service is unavailable.", [], null, null, { qlooApiCalls: calls });
+  }
 }
 
 function placeLabel(entity: QlooEntity, category: string): string {
@@ -358,6 +439,7 @@ function placeLabel(entity: QlooEntity, category: string): string {
 export async function POST(request: NextRequest) {
   const body: unknown = await request.json().catch(() => null);
   const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  if (bodyRecord.mode === "next_discovery") return nextDiscovery(request, bodyRecord);
   const reflectionsInput = Array.isArray(bodyRecord.reflections) ? bodyRecord.reflections : [];
   const reflections = reflectionsInput.flatMap(value => value && typeof value === "object" && typeof (value as { text?: unknown }).text === "string" ? [(value as { text: string }).text.slice(0, 1200)] : []);
   const experience = bodyRecord.experience && typeof bodyRecord.experience === "object" ? bodyRecord.experience as Record<string, unknown> : {};
@@ -446,8 +528,7 @@ export async function POST(request: NextRequest) {
     const ordered = practicalOrder.flatMap(category => available.filter(candidate => candidate.category === category && !known.has(entityId(candidate.entity)!)));
     const discouraged = new Set(memory.chapters.filter(chapter => chapter.feedback === "not_for_us").map(chapter => chapter.recommendation.category));
     const preferred = ordered.filter(candidate => !discouraged.has(candidate.category));
-    const unexplored = new Set(memory.profile.unexplored.map(opportunity => opportunity.category));
-    const baseline = [...preferred.filter(candidate => unexplored.has(candidate.category)), ...preferred.filter(candidate => !unexplored.has(candidate.category)), ...ordered.filter(candidate => discouraged.has(candidate.category))];
+    const baseline = [...preferred, ...ordered.filter(candidate => discouraged.has(candidate.category))];
     const enrichment = await enrichCandidates(baseline, { database: env.DB, base, key: qlooKey });
     const practicalRanking = rerankCandidates(enrichment.candidates, memory.practical ?? []);
     const selected = practicalRanking.ranked[0]?.candidate;
@@ -462,6 +543,8 @@ export async function POST(request: NextRequest) {
       id: crypto.randomUUID(), pairId, timestamp: new Date().toISOString(), mode: "LIVE",
       inputs: { you: safeInput.reflections[0].text, partner: safeInput.reflections[1].text },
       entities: resolvedEntities, participants: extraction.participants,
+      discovery: { domain: discoveryDomains.find(domain => domain.id === selected.category)!.id, status: "suggested", sourceChapterIds: memory.chapters.map(item => item.id), location,
+        why: { known: extraction.sharedSpark.summary, new: "This candidate is not among your retained recommendations or known entity IDs.", fits: `Qloo supplied ${title} for verified interests from both people. ${practicalRanking.rationale}` } },
       recommendation: { id, name: title, category: selected.category, description: adventureCopy(selected.category, title), place: placeLabel(selected.entity, selected.category), rationale: `${extraction.sharedSpark.summary} ${rememberedWhy}` },
     });
     let memorySaved = false;
@@ -473,6 +556,7 @@ export async function POST(request: NextRequest) {
       qlooEntityId: id,
       title,
       category: selected.category,
+      discovery: chapter?.discovery,
       eyebrow: "YOUR NEXT ADVENTURE",
       description: adventureCopy(selected.category, title),
       place: placeLabel(selected.entity, selected.category),

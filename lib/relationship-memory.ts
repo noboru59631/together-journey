@@ -1,5 +1,7 @@
+import { domainDirections, explorationHistory, type DiscoveryRecord, type DomainHistory } from "./discovery";
+
 export type Person = "you" | "partner";
-export type Feedback = "liked" | "neutral" | "not_for_us";
+export type Feedback = "liked" | "good_surprise" | "neutral" | "not_for_us";
 export type GroundedEntity = { id: string; name: string; type: string; participant: Person; confidence: number; provenance: "explicit" | "inferred"; why: string };
 export type TasteParticipant = { id: Person; label: string; likes: string[]; dislikes: string[]; emotionalContext: string[] };
 export type MemoryChapter = {
@@ -13,24 +15,18 @@ export type MemoryChapter = {
   state: "LIVE";
   feedback: Feedback | null;
   reflection: string;
+  discovery?: DiscoveryRecord;
 };
 export type Signal = { tag: string; count: number; chapterIds: string[] };
 export type TasteProfile = {
   chapters: number;
   shared: Signal[];
   different: { you: Signal[]; partner: Signal[] };
-  unexplored: Array<{ category: string; label: string }>;
+  unexplored: Array<{ category: string; label: string; evidence: string[]; sourceChapterIds: string[] }>;
+  exploration: DomainHistory[];
   avoided: string[];
 };
-export type MemorySnapshot = { chapters: MemoryChapter[]; profile: TasteProfile; practical?: import("./practical-preferences").PreferenceState[]; persistence: "D1" | "unavailable" };
-
-const opportunities = [
-  { category: "place", label: "Places, gardens & architecture" },
-  { category: "book", label: "Books & stories" },
-  { category: "destination", label: "Destinations & neighborhoods" },
-  { category: "artist", label: "Music & live performance" },
-  { category: "movie", label: "Film & immersive worlds" },
-];
+export type MemorySnapshot = { chapters: MemoryChapter[]; profile: TasteProfile; practical?: import("./practical-preferences").PreferenceState[]; asOf?: string; persistence: "D1" | "unavailable" };
 
 export function normalizeTag(value: string) {
   return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 100);
@@ -44,6 +40,7 @@ export function createChapter(input: {
   id: string; pairId: string; timestamp: string; inputs: MemoryChapter["inputs"];
   mode: string; entities: GroundedEntity[]; participants: TasteParticipant[];
   recommendation: MemoryChapter["recommendation"];
+  discovery?: DiscoveryRecord;
 }): MemoryChapter | null {
   if (input.mode !== "LIVE" || new Set(input.entities.map(entity => entity.id)).size < 2) return null;
   if (!["you", "partner"].every(person => input.entities.some(entity => entity.participant === person))) return null;
@@ -55,6 +52,7 @@ export function createChapter(input: {
       return { person: participant.id, label: participant.label, entityIds: entities.filter(entity => entity.participant === participant.id).map(entity => entity.id), tags: tags([...participant.likes, ...participant.emotionalContext]).filter(tag => !dislikes.includes(tag)), dislikes };
     }),
     recommendation: input.recommendation, state: "LIVE", feedback: null, reflection: "",
+    ...(input.discovery ? { discovery: input.discovery } : {}),
   };
 }
 
@@ -62,11 +60,8 @@ export function deriveProfile(chapters: MemoryChapter[]): TasteProfile {
   const unique = [...new Map(chapters.filter(chapter => chapter.state === "LIVE").map(chapter => [chapter.id, chapter])).values()];
   const signals = { you: new Map<string, Set<string>>(), partner: new Map<string, Set<string>>() };
   const sharedChapters = new Map<string, Set<string>>();
-  const domains = new Set<string>();
   const avoided = new Set<string>();
   for (const chapter of unique) {
-    for (const entity of chapter.entities) domains.add(entity.type.replace("urn:entity:", ""));
-    if (chapter.feedback === "liked") domains.add(chapter.recommendation.category);
     if (chapter.feedback === "not_for_us") avoided.add(chapter.recommendation.id);
     for (const reaction of chapter.reactions) {
       for (const tag of tags(reaction.tags)) {
@@ -84,12 +79,14 @@ export function deriveProfile(chapters: MemoryChapter[]): TasteProfile {
   const toSignals = (values: Map<string, Set<string>>) => [...values].map(([tag, evidence]) => ({ tag, count: evidence.size, chapterIds: [...evidence].sort() })).sort((first, second) => second.count - first.count || first.tag.localeCompare(second.tag));
   const shared = toSignals(sharedChapters);
   const sharedTags = new Set(shared.map(signal => signal.tag));
-  return {
+  const profile: TasteProfile = {
     chapters: unique.length, shared,
     different: { you: toSignals(signals.you).filter(signal => !sharedTags.has(signal.tag)), partner: toSignals(signals.partner).filter(signal => !sharedTags.has(signal.tag)) },
-    unexplored: unique.length ? opportunities.filter(opportunity => !domains.has(opportunity.category)) : [],
+    unexplored: [], exploration: explorationHistory(unique),
     avoided: [...avoided].sort(),
   };
+  profile.unexplored = domainDirections(profile, unique).filter(direction => !direction.explored).map(({ category, label, evidence, sourceChapterIds }) => ({ category, label, evidence, sourceChapterIds }));
+  return profile;
 }
 
 export function memoryContext(chapters: MemoryChapter[]) {

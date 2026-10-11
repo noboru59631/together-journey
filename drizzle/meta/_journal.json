@@ -29,6 +29,13 @@
       "when": 1791697935822,
       "tag": "0003_thankful_odin",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791700000000,
+      "tag": "0004_discovery_history",
+      "breakpoints": true
     }
   ]
 }

@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-const feedbackSchema = z.object({ chapterId: z.string().uuid(), feedback: z.enum(["liked", "neutral", "not_for_us"]), reflection: z.string().max(2000).optional(), preference: signalSchema.optional() }).strict();
+const feedbackSchema = z.object({ chapterId: z.string().uuid(), feedback: z.enum(["liked", "good_surprise", "neutral", "not_for_us"]), reflection: z.string().max(2000).optional(), preference: signalSchema.optional(), status: z.enum(["suggested", "tried", "skipped"]).optional() }).strict();
 
 export async function PATCH(request: NextRequest) {
   if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
@@ -48,7 +48,7 @@ export async function PATCH(request: NextRequest) {
   const id = pairId(request);
   try {
     if (!env.DB) throw new Error("Storage unavailable");
-    const { chapterId, feedback, reflection, preference } = parsed.data;
+    const { chapterId, feedback, reflection, preference, status } = parsed.data;
     const snapshot = await readMemory(env.DB, id);
     if (!snapshot.chapters.some(chapter => chapter.id === chapterId && chapter.state === "LIVE")) return respond({ error: "Chapter not found" }, id, 404);
     const signals: Array<PreferenceSignal & { source: PreferenceEvidence["source"] }> = preference ? [{ ...preference, source: "explicit_chip" }] : [];
@@ -57,7 +57,7 @@ export async function PATCH(request: NextRequest) {
       if (!key) return respond({ error: "Note interpretation is unavailable. Use the preference chips instead." }, id, 503);
       signals.push(...(await interpretPreferenceNote(reflection, key, process.env.OPENAI_MODEL ?? "gpt-4o-mini")).filter(signal => signal.dimension !== preference?.dimension).map(signal => ({ ...signal, source: "free_text" as const })));
     }
-    if (!await updateFeedback(env.DB, id, chapterId, feedback, reflection, signals)) return respond({ error: "Chapter not found" }, id, 404);
+    if (!await updateFeedback(env.DB, id, chapterId, feedback, reflection, signals, status ?? (feedback === "not_for_us" ? "skipped" : undefined))) return respond({ error: "Chapter not found" }, id, 404);
     return respond(await readMemory(env.DB, id), id);
   } catch {
     return respond({ error: "Could not save feedback. Please try again." }, id, 503);
