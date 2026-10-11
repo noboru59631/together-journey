@@ -76,13 +76,10 @@ export function deriveProfile(chapters: MemoryChapter[]): TasteProfile {
       }
       for (const tag of reaction.dislikes) avoided.add(`${reaction.person}: ${normalizeTag(tag)}`);
     }
-    const you = chapter.reactions.find(reaction => reaction.person === "you")?.tags ?? [];
-    const partner = chapter.reactions.find(reaction => reaction.person === "partner")?.tags ?? [];
-    for (const tag of tags(you).filter(tag => tags(partner).includes(tag))) {
-      const evidence = sharedChapters.get(tag) ?? new Set<string>();
-      evidence.add(chapter.id);
-      sharedChapters.set(tag, evidence);
-    }
+  }
+  for (const [tag, evidence] of signals.you) {
+    const partnerEvidence = signals.partner.get(tag);
+    if (partnerEvidence) sharedChapters.set(tag, new Set([...evidence, ...partnerEvidence]));
   }
   const toSignals = (values: Map<string, Set<string>>) => [...values].map(([tag, evidence]) => ({ tag, count: evidence.size, chapterIds: [...evidence].sort() })).sort((first, second) => second.count - first.count || first.tag.localeCompare(second.tag));
   const shared = toSignals(sharedChapters);
@@ -116,7 +113,7 @@ export function memoryExplanation(chapters: MemoryChapter[], category: string) {
   const overlap = shared ? `you both responded to ${shared}` : "your earlier reflections opened different doors";
   const difference = you && partner ? `, while A responded to ${you} and B to ${partner}` : "";
   const newDomain = profile.unexplored.some(opportunity => opportunity.category === category);
-  return `Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and explored a new ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
+  return `Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and looked for discovery in your still-unexplored ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
 }
 
 export function historicalEntities(chapters: MemoryChapter[]) {

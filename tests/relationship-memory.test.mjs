@@ -82,6 +82,19 @@ test("unsuccessful, demo and fallback interactions cannot become valid chapters"
   assert.equal(chapter({ entities: [] }), null);
 });
 
+test("a common interest becomes Shared even when discovered in different chapters", () => {
+  const first = chapter();
+  const second = chapter({ id: otherPair });
+  second.reactions[0].tags.push("emotion");
+  second.reactions[1].tags = ["architecture"];
+  const profile = memory.deriveProfile([second, first]);
+  const sharedEmotion = profile.shared.find(signal => signal.tag === "emotion");
+  assert.equal(sharedEmotion.count, 2);
+  assert.equal(sharedEmotion.chapterIds.length, 2);
+  assert.equal(profile.different.you.some(signal => signal.tag === "emotion"), false);
+  assert.equal(profile.different.partner.some(signal => signal.tag === "emotion"), false);
+});
+
 test("real SQLite migrations support durable roundtrip, pair isolation, feedback and reset", async () => {
   const db = database();
   try {
