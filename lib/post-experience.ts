@@ -184,6 +184,9 @@ export function experienceExplanation(chapters: MemoryChapter[]) {
   const chapterId = reviews[0].chapterId;
   const recent = reviews.filter(review => review.chapterId === chapterId);
   const summaries = whatWeLearned(recent);
-  const lines = summaries.length ? summaries : recent.map(review => `${review.person}: ${overallLabels[review.overall]}.${review.taste.filter(signal => signal.sentiment === "positive").map(signal => ` Enjoyed the ${signal.tag}.`).join("")}${review.practical.map(signal => ` Preferred ${labels[signal.dimension][signal.value < 0 ? 0 : 1].toLowerCase()} next time.`).join("")}`);
+  const lines = summaries.length ? summaries : recent.map(review => `${review.person}: ${overallLabels[review.overall]}.${review.taste.filter(signal => signal.sentiment === "positive").map(signal => ` Enjoyed the ${signal.tag}.`).join("")}${review.practical.map(signal => {
+    const label = labels[signal.dimension][signal.value < 0 ? 0 : 1].toLowerCase();
+    return signal.futurePreference ? ` Preferred ${label} next time.` : signal.signalClass === "stable_preference" ? ` Explicitly described a usual preference for ${label}.` : ` Reacted toward ${label} in this experience.`;
+  }).join("")}`);
   return `From your actual experience of ${recent[0].entityName}: ${lines.join(" ")} These are recent observations, not proof of a lasting preference. Candidate practical details still require their own evidence.`;
 }

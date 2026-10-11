@@ -76,7 +76,7 @@ export function layeredMemoryExplanation(chapters: MemoryChapter[], now?: string
   const memory = derivePreferenceMemory(chapters, now);
   const pair = memory.longTerm.filter(item => item.person === "pair");
   const stable = memory.longTerm.filter(item => item.person === "pair" || !pair.some(shared => shared.kind === item.kind && shared.signal === item.signal));
-  const enduring = stable.slice(0, 4).map(item => `${item.person === "pair" ? "You both" : item.person} ${item.promotionSource === "explicit_stable" && item.chapterCount === 1 ? "explicitly described" : "have recurring evidence for"} ${memorySignalLabel(item)}.`);
+  const enduring = stable.slice(0, 4).map(item => `${item.person === "pair" ? "You both" : item.person} ${item.promotionSource === "explicit_stable" && item.chapterCount === 1 ? "explicitly described" : `${item.person === "pair" ? "have" : "has"} recurring evidence for`} ${memorySignalLabel(item)}.`);
   const recent = memory.recentContext.slice(0, 6).map(item => `${item.person}: ${item.evidence} (recent context${item.futurePreference ? "; next-time request" : ""}).`);
   return [...enduring, ...(recent.length ? [`What mattered recently: ${recent.join(" ")} These temporary observations do not establish a lasting preference.`] : []), ...(enduring.length || recent.length ? ["Together uses enduring preferences as a baseline and recent context as a temporary modifier. Candidate conditions still require their own evidence."] : [])].join(" ");
 }

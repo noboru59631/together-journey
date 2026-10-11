@@ -39,6 +39,14 @@ test("one contextual reaction and one unqualified like do not establish stable p
   assert.equal(derive([liked]).stillLearning[0].netWeight, 2);
 });
 
+test("A-only explanation does not turn a current reaction into a request for next time", () => {
+  const first = chapter(1, context("Lively was fun this time.", "quiet", 1));
+  first.experiencedAt = new Date().toISOString();
+  first.experienceReviews[0].reviewedAt = first.experiencedAt;
+  assert.match(experience.experienceExplanation([first]), /Reacted toward livelier in this experience/);
+  assert.doesNotMatch(experience.experienceExplanation([first]), /Preferred livelier next time/);
+});
+
 test("explicit habitual phrasing creates stable evidence only for its submitting person", () => {
   const value = derive([chapter(1, stable())]);
   assert.equal(value.longTerm.length, 1);
