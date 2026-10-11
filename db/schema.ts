@@ -1,4 +1,9 @@
-import { index, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+export const practicalEvidence = sqliteTable("practical_evidence", {
+  pairId: text("pair_id").notNull(), chapterId: text("chapter_id").notNull(), entityId: text("entity_id").notNull(),
+  dimension: text("dimension").notNull(), value: integer("value").notNull(), weight: integer("weight").notNull(),
+  source: text("source").notNull(), timestamp: text("timestamp").notNull(),
+}, table => [uniqueIndex("idx_practical_evidence_unique").on(table.pairId, table.chapterId, table.dimension, table.source)]);
 export const pairSessions = sqliteTable("pair_sessions", {
   id: text("id").primaryKey(),
   createdAt: text("created_at").notNull(),

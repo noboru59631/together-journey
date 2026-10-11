@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { pairCookie, readMemory, saveMemory, validPairId } from "../../../lib/memory-store";
 import { createChapter, deriveProfile, historicalEntities, memoryContext, memoryExplanation, type MemorySnapshot } from "../../../lib/relationship-memory";
+import { rerankCandidates } from "../../../lib/practical-preferences";
 
 export const runtime = "edge";
 
@@ -445,14 +446,16 @@ export async function POST(request: NextRequest) {
     const discouraged = new Set(memory.chapters.filter(chapter => chapter.feedback === "not_for_us").map(chapter => chapter.recommendation.category));
     const preferred = ordered.filter(candidate => !discouraged.has(candidate.category));
     const unexplored = new Set(memory.profile.unexplored.map(opportunity => opportunity.category));
-    const selected = preferred.find(candidate => unexplored.has(candidate.category)) ?? preferred[0] ?? ordered[0];
+    const baseline = [...preferred.filter(candidate => unexplored.has(candidate.category)), ...preferred.filter(candidate => !unexplored.has(candidate.category)), ...ordered.filter(candidate => discouraged.has(candidate.category))];
+    const practicalRanking = rerankCandidates(baseline, memory.practical ?? []);
+    const selected = practicalRanking.ranked[0]?.candidate;
     if (!selected) return fallback(available.length ? "Every Qloo candidate is already in this Journey." : "Qloo returned no usable cross-domain candidate.", reflections, extraction, model, { resolvedEntities, unresolvedEntities, candidateCategories, qlooApiCalls });
 
     const id = entityId(selected.entity)!;
     const title = entityName(selected.entity)!;
     const knownFilteredCount = available.filter(candidate => known.has(entityId(candidate.entity)!)).length;
     const sourceSummary = signals.map(entity => `${entity.name} (${entity.participant})`).join(" · ");
-    const rememberedWhy = memoryExplanation(memory.chapters, selected.category);
+    const rememberedWhy = [memoryExplanation(memory.chapters, selected.category), practicalRanking.rationale].filter(Boolean).join(" ");
     const chapter = createChapter({
       id: crypto.randomUUID(), pairId, timestamp: new Date().toISOString(), mode: "LIVE",
       inputs: { you: safeInput.reflections[0].text, partner: safeInput.reflections[1].text },
@@ -486,6 +489,7 @@ export async function POST(request: NextRequest) {
         candidateCount: candidateCategories.reduce((total, category) => total + category.count, 0),
         knownFilteredCount,
         candidateCategories,
+        practicalRanking: { changed: practicalRanking.changed, candidates: practicalRanking.ranked.map(item => ({ id: entityId(item.candidate.entity), name: entityName(item.candidate.entity), originalIndex: item.index, score: item.score, contributors: item.contributors })) },
         qlooApiCalls,
         explanation: {
           input: `Qloo Search verified ${sourceSummary}.`,

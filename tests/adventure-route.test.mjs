@@ -81,6 +81,7 @@ async function exercise({
   historyFailure = false,
   memoryHistory = [],
   memorySaveFailure = false,
+  preferenceHistory = [],
 } = {}) {
   const calls = [];
   const exports = {};
@@ -97,7 +98,7 @@ async function exercise({
     first: async () => ({ revoked_at: null }),
     all: async () => {
     if (historyFailure) throw new Error("history failed");
-    return { results: sql.includes("pair_memories") ? memoryHistory.map(chapter => ({ payload: JSON.stringify(chapter), feedback: chapter.feedback, reflection: chapter.reflection })) : history };
+    return { results: sql.includes("practical_evidence") ? preferenceHistory : sql.includes("pair_memories") ? memoryHistory.map(chapter => ({ payload: JSON.stringify(chapter), feedback: chapter.feedback, reflection: chapter.reflection })) : history };
   } }) }) };
   const context = vm.createContext({
     exports, URL, AbortSignal, Error, JSON, Set, Promise, Date, crypto: webcrypto,
@@ -254,6 +255,24 @@ test("malformed input is rejected before external requests", async () => {
   const { response, calls } = await exercise({ requestBody: { reflections: [] } });
   assert.equal(response.status, 400);
   assert.equal(calls.length, 0);
+});
+
+test("discovery reranks the same Qloo set after crowded-to-quieter evidence with supported rationale", async () => {
+  const candidates = [{ ...place, properties: { description: "A lively crowded place." } }, { ...nextPlace, properties: { description: "A quiet uncrowded place." } }];
+  const before = await exercise({ placeCandidates: candidates });
+  assert.equal(before.result.id, place.entity_id);
+  assert.equal(before.result.trace.practicalRanking.changed, false);
+  const preferenceHistory = [{ dimension: "quiet", value: -1, weight: 1, source: "free_text" }, { dimension: "crowds", value: -1, weight: 1, source: "free_text" }];
+  const after = await exercise({ placeCandidates: candidates, preferenceHistory });
+  assert.equal(after.result.id, nextPlace.entity_id);
+  assert.equal(after.result.trace.practicalRanking.changed, true);
+  assert.match(after.result.memory.explanation, /quieter and less crowded/);
+  assert.equal(after.result.trace.candidateCount, before.result.trace.candidateCount);
+  assert.deepEqual(new Set(after.result.trace.practicalRanking.candidates.map(item => item.id)), new Set(before.result.trace.practicalRanking.candidates.map(item => item.id)));
+  const unknown = await exercise({ preferenceHistory, placeCandidates: [place, nextPlace] });
+  assert.equal(unknown.result.id, place.entity_id);
+  assert.equal(unknown.result.trace.practicalRanking.changed, false);
+  assert.equal(unknown.result.memory.explanation.includes("ranked this higher"), false);
 });
 
 test("first grounded reveal records both reflections and separate entity reactions", async () => {

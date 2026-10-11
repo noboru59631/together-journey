@@ -15,6 +15,13 @@
       "when": 1791692459934,
       "tag": "0001_dizzy_iron_lad",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791695520540,
+      "tag": "0002_crazy_fenris",
+      "breakpoints": true
     }
   ]
 }

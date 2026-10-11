@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { ArrowLeft, BookOpen, ChevronRight, Compass, Film, Heart, MapPin, MessageCircleMore, Music2, Sparkles, Users, X } from "lucide-react";
-import { FeedbackButtons, MemoryInvitation, MemoryTimeline, OurTaste } from "../components/relationship-memory";
+import { FeedbackButtons, ExplorationTaste, PracticalFeedback, MemoryInvitation, MemoryTimeline, OurTaste } from "../components/relationship-memory";
+import type { PreferenceSignal } from "../lib/practical-preferences";
 import { deriveProfile, type Feedback, type MemorySnapshot } from "../lib/relationship-memory";
 
 type View = "journey" | "taste" | "talk" | "spark" | "reveal" | "return";
@@ -111,11 +112,11 @@ export default function Home() {
     return () => lifecycle.abort();
   }, []);
 
-  const feedbackMemory = useCallback(async (chapterId: string, feedback: Feedback, reflection?: string) => {
+  const feedbackMemory = useCallback(async (chapterId: string, feedback: Feedback, reflection?: string, preference?: PreferenceSignal) => {
     setMemoryBusy(true); setMemoryError("");
     try {
-      const response = await fetch("/api/memory", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ chapterId, feedback, reflection }) });
-      if (!response.ok) throw new Error("Feedback unavailable");
+      const response = await fetch("/api/memory", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ chapterId, feedback, reflection, preference }) });
+      if (!response.ok) { const result = await response.json() as { error?: string }; setMemoryError(result.error ?? "Could not save feedback."); return false; }
       setMemory(await response.json());
       return true;
     } catch { setMemoryError("Could not save feedback. Please try again."); return false; }
@@ -208,10 +209,10 @@ export default function Home() {
       <div className="screen-frame">
         {memoryError && <p role="alert" className="save-error memory-notice">{memoryError}</p>}
         {view === "journey" && <><Journey planned={planned} adventureTitle={adventure.title} onTalk={() => setView("talk")} count={memory?.chapters.length ?? 0}/><div className="memory-surfaces"><button className="secondary-action full" onClick={() => setView("taste")}>Our Taste · {memory?.profile.chapters ?? 0} chapters</button><MemoryTimeline memory={memory} busy={memoryBusy || loading} onFeedback={feedbackMemory} onReset={resetMemory}/></div></>}
-        {view === "taste" && <div className="memory-surfaces screen-enter"><OurTaste memory={memory}/><MemoryInvitation count={memory?.profile.chapters ?? 0} onTalk={() => setView("talk")}/></div>}
+        {view === "taste" && <div className="memory-surfaces screen-enter"><OurTaste memory={memory}/><ExplorationTaste memory={memory}/><MemoryInvitation count={memory?.profile.chapters ?? 0} onTalk={() => setView("talk")}/></div>}
         {view === "talk" && <><p className="memory-disclosure">Grounded reveals remember both reflections in your anonymous Journey. Reset our journey deletes them. Avoid sensitive personal information.</p><Talk value={conversation} setValue={setConversation} error={formError} onContinue={findAdventure}/></>}
         {view === "spark" && <SharedSpark adventure={adventure} loading={loading} onContinue={() => setView("reveal")} onBack={() => setView("talk")}/>}
-        {view === "reveal" && <>{adventure.memory && <p className="memory-why">{adventure.memory.explanation}</p>}<Reveal adventure={adventure} planned={planned} saveError={saveError} onExplain={() => setExplainOpen(true)} onAccept={() => saveJourney()} onReject={() => setView("talk")} onReturn={() => { setSaved(false); setView("return"); }}/>{adventure.memory?.saved && adventure.memory.chapterId && <div className="memory-surfaces"><p>Does this next adventure feel right? <small>Optional</small></p><FeedbackButtons value={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onChange={feedback => feedbackMemory(adventure.memory!.chapterId!, feedback)}/></div>}</>}
+{view === "reveal" && <>{adventure.memory && <p className="memory-why">{adventure.memory.explanation}</p>}<Reveal adventure={adventure} planned={planned} saveError={saveError} onExplain={() => setExplainOpen(true)} onAccept={() => saveJourney()} onReject={() => setView("talk")} onReturn={() => { setSaved(false); setView("return"); }}/>{adventure.memory?.saved && adventure.memory.chapterId && <div className="memory-surfaces"><p>Does this next adventure feel right? <small>Optional</small></p><FeedbackButtons value={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onChange={feedback => feedbackMemory(adventure.memory!.chapterId!, feedback)}/><PracticalFeedback key={adventure.memory.chapterId} chapterId={adventure.memory.chapterId} category={adventure.category} count={memory?.chapters.length ?? 0} feedback={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onSave={feedbackMemory}/></div>}</>}
         {view === "return" && <ReturnView adventure={adventure} note={note} setNote={setNote} reaction={reaction} setReaction={setReaction} saved={saved} saveError={saveError} onSave={() => reaction && saveJourney(reaction)} onJourney={() => setView("journey")}/>}
       </div>
       <nav className="bottom-nav" aria-label="Primary navigation">

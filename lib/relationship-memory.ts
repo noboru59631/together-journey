@@ -22,7 +22,7 @@ export type TasteProfile = {
   unexplored: Array<{ category: string; label: string }>;
   avoided: string[];
 };
-export type MemorySnapshot = { chapters: MemoryChapter[]; profile: TasteProfile; persistence: "D1" | "unavailable" };
+export type MemorySnapshot = { chapters: MemoryChapter[]; profile: TasteProfile; practical?: import("./practical-preferences").PreferenceState[]; persistence: "D1" | "unavailable" };
 
 const opportunities = [
   { category: "place", label: "Places, gardens & architecture" },

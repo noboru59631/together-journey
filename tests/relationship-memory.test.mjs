@@ -28,7 +28,7 @@ function chapter(overrides = {}) {
 
 function database() {
   const sqlite = new DatabaseSync(":memory:");
-  for (const migration of ["0000_flat_sue_storm.sql", "0001_dizzy_iron_lad.sql"]) sqlite.exec(readFileSync(new URL(`../drizzle/${migration}`, import.meta.url), "utf8"));
+  for (const migration of ["0000_flat_sue_storm.sql", "0001_dizzy_iron_lad.sql", "0002_crazy_fenris.sql"]) sqlite.exec(readFileSync(new URL(`../drizzle/${migration}`, import.meta.url), "utf8"));
   const prepare = sql => ({ bind: (...values) => ({
     async run() { const result = sqlite.prepare(sql).run(...values); return { meta: { changes: Number(result.changes) } }; },
     async first() { return sqlite.prepare(sql).get(...values) ?? null; },
@@ -41,12 +41,74 @@ function database() {
   } };
 }
 
+test("feedback endpoint interprets a note atomically and persists supported practical signals", async () => {
+  const db = database();
+  const request = body => ({ url: "https://together.test/api/memory", headers: { get: () => "https://together.test" }, cookies: { get: () => ({ value: pairId }) }, json: async () => body });
+  let fail = false;
+  const route = loadTypescript(fileURLToPath(new URL("../app/api/memory/route.ts", import.meta.url)), {
+    process: { env: { OPENAI_API_KEY: "mock", OPENAI_MODEL: "mock-model" } },
+    fetch: async () => ({ ok: !fail, json: async () => ({ output_text: JSON.stringify({ signals: [{ dimension: "crowds", value: -1 }, { dimension: "quiet", value: -1 }] }) }) }),
+    require: name => name === "cloudflare:workers" ? { env: { DB: db } } : name === "next/server" ? { NextResponse: { json: (value, init = {}) => ({ value, status: init.status ?? 200, cookies: { set() {} } }) } } : name === "zod" ? { z } : null,
+  });
+  try {
+    await store.readMemory(db, pairId);
+    await store.saveMemory(db, chapter());
+    const reflection = "We liked it, but it was too crowded. More quiet places next time.";
+    const updated = await route.PATCH(request({ chapterId, feedback: "liked", reflection }));
+    assert.equal(updated.status, 200);
+    assert.equal(updated.value.practical.length, 2);
+    assert.ok(updated.value.practical.every(state => state.score === -2 && state.count === 1));
+    assert.equal((await route.GET(request())).value.practical.length, 2);
+    fail = true;
+    assert.equal((await route.PATCH(request({ chapterId, feedback: "not_for_us", reflection: "quiet" }))).status, 503);
+    assert.equal((await store.readMemory(db, pairId)).chapters[0].feedback, "liked");
+    const chip = await route.PATCH(request({ chapterId, feedback: "liked", preference: { dimension: "pace", value: -1 } }));
+    assert.equal(chip.value.practical.find(state => state.dimension === "pace").score, -2);
+    assert.equal(chip.value.chapters[0].reflection, reflection);
+    await route.DELETE(request());
+    assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS count FROM practical_evidence").get().count, 0);
+  } finally { db.sqlite.close(); }
+});
+
 test("no history means no invented Shared, Different or Unexplored profile", () => {
   const profile = memory.deriveProfile([]);
   assert.equal(profile.chapters, 0);
   assert.equal(profile.shared.length, 0);
   assert.equal(profile.different.you.length, 0);
   assert.equal(profile.unexplored.length, 0);
+});
+
+test("practical evidence persists, is idempotent, scoped to LIVE chapters, blends and resets", async () => {
+  const db = database();
+  try {
+    assert.equal((await store.readMemory(db, pairId)).practical.length, 0);
+    await store.saveMemory(db, chapter());
+    const chips = [{ dimension: "crowds", value: -1, source: "explicit_chip" }];
+    await store.updateFeedback(db, pairId, chapterId, "liked", undefined, chips);
+    await store.updateFeedback(db, pairId, chapterId, "liked", undefined, chips);
+    let snapshot = await store.readMemory(db, pairId);
+    assert.equal(snapshot.practical[0].dimension, "crowds");
+    assert.equal(snapshot.practical[0].count, 1);
+    assert.equal(snapshot.practical[0].score, -2);
+    assert.equal((await store.readMemory(db, otherPair)).practical.length, 0);
+    await store.updateFeedback(db, pairId, chapterId, "liked", "We liked it, but it was too crowded. More quiet places next time.", [{ dimension: "quiet", value: -1, source: "free_text" }]);
+    snapshot = await store.readMemory(db, pairId);
+    assert.equal(snapshot.practical.length, 2);
+    await store.saveMemory(db, chapter({ id: otherPair }));
+    await store.updateFeedback(db, pairId, otherPair, "liked", undefined, [{ dimension: "crowds", value: 1, source: "explicit_chip" }]);
+    assert.equal((await store.readMemory(db, pairId)).practical.find(state => state.dimension === "crowds").score, 0);
+    await store.updateFeedback(db, pairId, chapterId, "liked", "No preference", []);
+    assert.equal((await store.readMemory(db, pairId)).practical.some(state => state.dimension === "quiet"), false);
+    assert.equal(await store.updateFeedback(db, pairId, "missing", "liked", undefined, chips), false);
+    for (const state of ["DEMO", "NEEDS_INPUT"]) {
+      const fake = { ...chapter(), id: `fake-${state}`, state };
+      db.sqlite.prepare("INSERT INTO pair_memories (id, pair_id, created_at, payload) VALUES (?, ?, ?, ?)").run(fake.id, pairId, fake.timestamp, JSON.stringify(fake));
+      assert.equal(await store.updateFeedback(db, pairId, fake.id, "liked", undefined, chips), false);
+    }
+    await store.clearMemory(db, pairId);
+    assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS count FROM practical_evidence").get().count, 0);
+    await assert.rejects(store.saveMemory(db, chapter()), /ended/);
+  } finally { db.sqlite.close(); }
 });
 
 test("auditable derivation preserves same-world different-reasons and deduplicates", () => {
