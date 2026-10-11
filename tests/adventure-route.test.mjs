@@ -82,6 +82,7 @@ async function exercise({
   memoryHistory = [],
   memorySaveFailure = false,
   preferenceHistory = [],
+  enrichmentFailure = false,
 } = {}) {
   const calls = [];
   const exports = {};
@@ -107,7 +108,7 @@ async function exercise({
       if (moduleName === "cloudflare:workers") return { env: { DB: database ? databaseMock : undefined } };
       if (moduleName === "next/server") return { NextResponse: { json: (value, init = {}) => ({ status: init.status ?? 200, cookies: { set() {} }, json: async () => value }) } };
       if (moduleName === "zod") return requireRepository("zod");
-      if (moduleName.startsWith("../../../lib/")) return loadTypescript(path.resolve(repository, "app/api/adventure", `${moduleName}.ts`));
+      if (moduleName.startsWith("../../../lib/")) return loadTypescript(path.resolve(repository, "app/api/adventure", `${moduleName}.ts`), { fetch: context.fetch });
       throw new Error(`Unexpected test import: ${moduleName}`);
     },
     fetch: async (urlValue, options) => {
@@ -123,7 +124,10 @@ async function exercise({
       if (qlooFailure instanceof Error) throw qlooFailure;
       if (typeof qlooFailure === "number") return { ok: false, status: qlooFailure };
       let entities;
-      if (url.pathname === "/search") {
+      if (url.pathname === "/entities") {
+        if (enrichmentFailure) throw new Error("Enrichment offline");
+        entities = placeCandidates;
+      } else if (url.pathname === "/search") {
         const query = url.searchParams.get("query");
         entities = searchOverride ? searchOverride(query, url.searchParams.get("types")) : [entityFixtures[query]].filter(Boolean);
       } else if (emptyInsights) {
@@ -148,6 +152,31 @@ test("missing LLM key is DEMO and does not claim free-form understanding", async
   assert.equal(result.mode, "DEMO");
   assert.equal(result.trace.extractionMode, "DEMO");
   assert.equal(calls.length, 0);
+});
+
+test("price enrichment precedes pair reranking and retains Qloo identity and provenance", async () => {
+  const premium = { ...place, properties: { ...place.properties, price_level: 4 } };
+  const budget = { ...nextPlace, properties: { ...nextPlace.properties, price_level: 1 } };
+  const { result, calls } = await exercise({ placeCandidates: [premium, budget], preferenceHistory: [{ chapterId: "prior", dimension: "budget", value: -1, weight: 1, source: "free_text" }] });
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.id, nextPlace.entity_id);
+  assert.equal(result.practicalMetadata.price.evidence_type, "verified");
+  assert.match(result.practicalMetadata.price.evidence_source, /\/entities\?entity_ids=/);
+  assert.equal(result.trace.practicalEnrichment.providerStatus, "ok");
+  assert.equal(result.trace.practicalRanking.recommendationChanged, true);
+  assert.equal(calls.filter(call => call.url.pathname === "/entities").length, 1);
+  assert.deepEqual(new Set(result.trace.practicalRanking.candidates.map(item => item.id)), new Set([place.entity_id, nextPlace.entity_id, book.entity_id, destination.entity_id]));
+});
+
+test("enrichment outage preserves LIVE, all grounded candidates, unknown price and relationship memory", async () => {
+  const { result, stored } = await exercise({ placeCandidates: [place, nextPlace], enrichmentFailure: true, preferenceHistory: [{ chapterId: "prior", dimension: "budget", value: -1, weight: 1, source: "free_text" }] });
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.id, place.entity_id);
+  assert.equal(result.practicalMetadata.price.value, "unknown");
+  assert.equal(result.trace.practicalEnrichment.providerStatus, "unavailable");
+  assert.ok(result.trace.practicalRanking.candidates.every(item => item.score === 0));
+  assert.equal(result.trace.practicalRanking.changed, false);
+  assert.equal(stored.length, 1);
 });
 
 for (const [name, requestBody, extractionResult] of [
