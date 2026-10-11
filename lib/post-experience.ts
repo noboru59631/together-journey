@@ -56,12 +56,15 @@ const practicalMentions: Record<typeof dimensions[number], RegExp> = {
 
 export function classifyReaction<Signal extends { evidence: string; signalClass?: SignalClass; contextMarker?: string | null; futurePreference?: boolean }>(signal: Signal) {
   const evidence = signal.evidence;
-  const marker = signal.contextMarker && evidence.includes(signal.contextMarker) ? signal.contextMarker : null;
+  const suppliedMarker = signal.contextMarker && evidence.includes(signal.contextMarker) ? signal.contextMarker : null;
   const habitual = /\b(usually|always|generally|consistently|tend to|normally|in general)\b|普段|いつも|通常|たいてい/i;
   const situational = /\b(today|tonight|this time|that day|were tired|was tired|because|this evening|this morning)\b|今日|今夜|今回は|疲れて|その日/i;
   const futurePreference = /\b(next time|next outing|next visit|next chapter)\b|次回|次は/i.test(evidence);
-  const negatedHabit = /\b(not|never|don't|do not|didn't)\s+(?:\w+\s+){0,2}(usually|always|generally|normally|consistently)\b/i.test(evidence);
-  const explicitStable = signal.signalClass === "stable_preference" && Boolean(marker && habitual.test(marker)) && habitual.test(evidence) && !negatedHabit && !situational.test(evidence) && !futurePreference;
+  const negatedHabit = /\b(not|never|don't|do not|didn't)\s+(?:\w+\s+){0,2}(usually|always|generally|normally|consistently)\b|\b(usually|always|generally|normally|consistently)\s+(?:don't|do not|not|never)\b/i.test(evidence);
+  const preferenceWording = /\b(prefer|enjoy|love|like|dislike|hate|better|favo(?:u)?r)\b|好き|好む|苦手|好み/i.test(evidence);
+  const habitualMarker = evidence.match(habitual)?.[0] ?? null;
+  const marker = suppliedMarker ?? habitualMarker;
+  const explicitStable = Boolean(habitualMarker) && preferenceWording && !negatedHabit && !situational.test(evidence) && !futurePreference;
   const contextual = situational.test(evidence) || futurePreference || (signal.signalClass === "contextual_reaction" && Boolean(marker));
   return { ...signal, signalClass: explicitStable ? "stable_preference" as const : contextual ? "contextual_reaction" as const : "uncertain" as const, contextMarker: marker, futurePreference };
 }
@@ -88,7 +91,7 @@ export function relevantChips(domain: string): Array<keyof typeof experienceChip
 }
 
 export async function reviewFingerprint(input: ReviewInput) {
-  const canonical = JSON.stringify({ interpretationVersion: 3, ...input, chips: [...new Set(input.chips)].sort() });
+  const canonical = JSON.stringify({ interpretationVersion: 4, ...input, chips: [...new Set(input.chips)].sort() });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
 }

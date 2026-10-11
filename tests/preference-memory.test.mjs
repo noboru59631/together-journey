@@ -49,10 +49,11 @@ test("explicit habitual phrasing creates stable evidence only for its submitting
 });
 
 test("model cannot promote unsupported, negated or contextual habitual wording", () => {
-  for (const evidence of ["I liked quiet music.", "We do not usually prefer quieter places.", "We usually prefer quieter places but were tired tonight."]) {
+  for (const evidence of ["I liked quiet music.", "We do not usually prefer quieter places.", "We usually do not prefer quieter places.", "The café is usually crowded.", "We usually prefer quieter places but were tired tonight."]) {
     assert.notEqual(experience.classifyReaction({ ...stable("quiet"), evidence }).signalClass, "stable_preference");
   }
   assert.equal(experience.classifyReaction(stable("quiet")).signalClass, "stable_preference");
+  assert.equal(experience.classifyReaction({ ...stable("quiet"), signalClass: "uncertain", contextMarker: null }).signalClass, "stable_preference");
 });
 
 test("strict classification preserves omitted sentence context and does not invent consensus", async () => {
