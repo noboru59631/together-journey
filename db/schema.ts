@@ -30,6 +30,15 @@ export const pairSessions = sqliteTable("pair_sessions", {
   createdAt: text("created_at").notNull(),
   revokedAt: text("revoked_at"),
 });
+export const soloSessions = sqliteTable("solo_sessions", {
+  id: text("id").primaryKey(), createdAt: text("created_at").notNull(),
+  archetype: text("archetype").notNull().default("explorer"), seeds: text("seeds").notNull().default("[]"),
+  revokedAt: text("revoked_at"),
+});
+export const soloMemories = sqliteTable("solo_memories", {
+  id: text("id").primaryKey(), soloId: text("solo_id").notNull(),
+  createdAt: text("created_at").notNull(), payload: text("payload").notNull(),
+}, table => [index("idx_solo_memories_time").on(table.soloId, table.createdAt)]);
 export const pairMemories = sqliteTable("pair_memories", {
   id: text("id").primaryKey(),
   pairId: text("pair_id").notNull(),

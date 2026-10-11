@@ -87,8 +87,9 @@ export function supportedReactionSignals(parsed: InterpretedReview): Interpreted
 
 export function canExperience(chapter: MemoryChapter) {
   return chapter.state === "LIVE" && Boolean(chapter.recommendation.id?.trim() && chapter.recommendation.name?.trim()) &&
-    ["you", "partner"].every(person => chapter.entities.some(entity => entity.participant === person && entity.id)) &&
-    new Set(chapter.entities.map(entity => entity.id)).size >= 2;
+    (chapter.scope === "solo" ? chapter.entities.some(entity => entity.participant === "you" && entity.id) :
+      ["you", "partner"].every(person => chapter.entities.some(entity => entity.participant === person && entity.id)) &&
+      new Set(chapter.entities.map(entity => entity.id)).size >= 2);
 }
 
 export function relevantChips(domain: string): Array<keyof typeof experienceChips> {

@@ -10,6 +10,7 @@ export type TasteParticipant = { id: Person; label: string; likes: string[]; dis
 export type MemoryChapter = {
   id: string;
   pairId: string;
+  scope?: "solo";
   timestamp: string;
   inputs: { you: string; partner: string };
   entities: GroundedEntity[];
@@ -21,6 +22,7 @@ export type MemoryChapter = {
   discovery?: DiscoveryRecord;
   experiencedAt?: string;
   experienceReviews?: ExperienceReview[];
+  soloPreferences?: import("./practical-preferences").PreferenceEvidence[];
 };
 export type Signal = { tag: string; count: number; chapterIds: string[]; weight?: number; postExperienceCount?: number };
 export type TasteProfile = {

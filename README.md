@@ -15,6 +15,23 @@ The calm existing Journey now leads with **Next Discovery**: resume the latest s
 
 **Our Taste → Unexplored** now lists only supported directions with matching prior Shared or Different tags, supporting chapter IDs, and a **Try this direction** action. These are plausible directions, not confirmed preferences or promises of candidate availability. A subcategory does not become a LIVE reveal until Qloo returns a matching place. Grounded input domains already present in the pair's interests are not called unexplored. Rejected chapters are not positive discovery evidence.
 
+## Solo + AI Partner
+
+Together can explore with someone you care about — or with an AI discovery partner that helps you step just beyond your usual taste. The first screen offers **Two of us** and **Just me + AI Partner**. The solo partner is a recommendation strategy, not a simulated human relationship or emotional replacement. There is no avatar or chat roleplay.
+
+Solo starts with one or two named interests and optional short reactions. Qloo Search must verify an exact entity before it becomes a seed. No history is fabricated, and stable preferences appear only when the existing evidence policy promotes actual post-experience observations. The learning loop remains **Experience → React → Learn → Discover → Experience Again**: save a Qloo recommendation, mark **I tried this**, choose Loved it / Liked it / It was okay / Not for me, and optionally add a note or aspect chips. Positive experienced entities can ground later Qloo Insights requests; negative reactions lower their domain's future score. Unsupported categories remain hidden; a failed Qloo lookup produces no LIVE recommendation.
+
+Four language-agnostic archetype IDs control deterministic ranking. Change them at any time without deleting memory. For each enabled domain, `familiar` counts matching seed or stable positive taste cues, `contrast` counts up to two different non-rejected cues, and `seen` is the number of earlier solo recommendations. Domain score is `familiar × F + (seen = 0 ? N : 0) + min(contrast, 2) × C − seen × R + 2 × mean domain feedback + (seed entity has this Qloo type ? 1 : 0)`. Ties follow the declared domain order. Only Qloo Insights candidates with supported type/classification enter candidate ranking. Candidate score is the existing `3 × practical + 2 + 1/(Qloo order + 1)` plus `candidate familiarity × F + (seen = 0 ? N : 0) + candidate contrast × C − seen × R`. Candidate familiarity requires the returned Qloo name or description to contain a seed name. Repeated IDs and near duplicates are excluded. Candidate facts that directly contradict explicit solo practical chips are excluded.
+
+| Strategy | `F` familiarity | `N` unexplored | `C` contrast | `R` repetition |
+| --- | ---: | ---: | ---: | ---: |
+| Comfort Partner (`comfort`) | 5 | 1 | 0 | 1 |
+| Explorer Partner (`explorer`) | 3 | 4 | 1 | 2 |
+| Opposite Taste (`opposite`) | 1 | 2 | 5 | 2 |
+| Surprise Me (`surprise`) | 1 | 6 | 2 | 4 |
+
+Migration `0007_busy_ultron.sql` adds `solo_sessions` (opaque solo cookie ID, archetype, verified seeds) and `solo_memories` (grounded chapters, reactions and practical evidence). Stable/contextual memory and exploration counts are deterministically derived from those persisted chapters. Pair data remains in `pair_sessions` and `pair_memories` with its original cookie and flow. Switching modes changes the locally saved view preference and never copies data. Each mode's reset revokes and deletes only that mode's profile. Neither profile's routes store account secrets. The anonymous cookie expires after 90 days; clearing cookies can make the server-held profile inaccessible.
+
 ### Capability map
 
 The map in `lib/discovery.ts` follows the [official Qloo Insights entity types](https://github.com/qloo/docs-public/blob/main/reference/insights-api-deep-dive.md). Account coverage can still produce no candidates; Together reports FALLBACK without recording a discovery.

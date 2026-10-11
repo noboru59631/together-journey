@@ -29,9 +29,9 @@ export function ExperienceReviewCard({ chapter, busy, onSave }: { chapter: Memor
   return <div className="experience-review">
     {!chapter.experiencedAt ? <><button className="secondary-action" disabled={busy} onClick={() => onSave({ action: "experienced", chapterId: chapter.id })}>{t("experience.try")}</button><p className="experience-hint">{t("experience.hint")}</p></> : <>
       <span className="eyebrow">{t("experience.eyebrow")}</span><p>{t("experience.question")}</p>
-      <div className="experience-people">{(["A", "B"] as const).map(person => {
+      <div className="experience-people">{(chapter.scope === "solo" ? ["A"] as const : ["A", "B"] as const).map(person => {
         const review = reviews.find(item => item.person === person);
-        return <button key={person} className="secondary-action" disabled={busy} onClick={() => edit(person)} aria-expanded={editing === person}>{t("common.person", { person })}<small>{review ? overallLabel(review.overall, locale) : t("experience.add")}</small></button>;
+        return <button key={person} className="secondary-action" disabled={busy} onClick={() => edit(person)} aria-expanded={editing === person}>{chapter.scope === "solo" ? t("solo.review.you") : t("common.person", { person })}<small>{review ? overallLabel(review.overall, locale) : t("experience.add")}</small></button>;
       })}</div>
       {editing && <div className="experience-form"><h4>{t("experience.reaction", { person: editing })}</h4><div className="memory-feedback">{overallReactions.map(value => <button key={value} aria-pressed={overall === value} disabled={busy} onClick={() => setOverall(value)}>{overallLabel(value, locale)}</button>)}</div>
         <label className="preference-note">{t("experience.note")} <small>{t("common.optional")}</small><input value={note} maxLength={1000} placeholder={t("experience.notePlaceholder")} onChange={event => setNote(event.target.value)}/></label>

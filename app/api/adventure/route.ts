@@ -7,6 +7,8 @@ import { rerankCandidates } from "../../../lib/practical-preferences";
 import { enrichCandidates } from "../../../lib/practical-metadata";
 import { discoveryDomains, domainDirections, discoveryWhy, domainEvidence, fitsDomain, placeClassificationTags, rankDiscoveries, type DiscoveryDomain, type DiscoveryRecord } from "../../../lib/discovery";
 import { categoryLabel, domainLabel, languageInstruction, normalizeLocale, translate, type Locale } from "../../../lib/i18n";
+import { soloDirections, rankSoloCandidates, soloRationale, type SoloSeed } from "../../../lib/solo-partner";
+import { readSolo, saveSoloChapter, soloCookie, updateSoloSettings, validSoloId } from "../../../lib/solo-store";
 
 export const runtime = "edge";
 
@@ -451,6 +453,71 @@ async function nextDiscovery(request: NextRequest, body: Record<string, unknown>
   }
 }
 
+const soloInterestSchema = z.object({ name: z.string().trim().min(2).max(120), type: z.enum(["urn:entity:movie", "urn:entity:artist", "urn:entity:book", "urn:entity:tv_show", "urn:entity:place", "urn:entity:destination"]), reaction: z.string().trim().max(240).default("") }).strict();
+const soloRequestSchema = z.object({ mode: z.literal("solo_discovery"), interests: z.array(soloInterestSchema).min(1).max(2).optional(), requestId: z.string().uuid().optional(), location: z.string().trim().max(100).optional(), locale: z.enum(["en", "ja"]).optional() }).strict();
+
+async function soloDiscovery(request: NextRequest, body: Record<string, unknown>) {
+  const parsed = soloRequestSchema.safeParse(body);
+  const locale = normalizeLocale(body.locale);
+  if (!parsed.success) return NextResponse.json({ error: translate(locale, "solo.error.interest") }, { status: 400 });
+  const origin = request.headers.get("origin");
+  if (origin && origin !== new URL(request.url).origin) return NextResponse.json({ error: translate(locale, "api.error.invalidOrigin") }, { status: 403 });
+  const existing = request.cookies.get(soloCookie)?.value;
+  const id = validSoloId(existing) ? existing : crypto.randomUUID();
+  if (!env.DB) return NextResponse.json({ error: translate(locale, "api.error.history") }, { status: 503 });
+  const key = process.env.QLOO_API_KEY;
+  if (!key) return NextResponse.json({ error: translate(locale, "api.error.qlooConfig") }, { status: 503 });
+  const base = process.env.QLOO_API_BASE_URL ?? "https://hackathon.api.qloo.com";
+  const calls: QlooApiCall[] = [];
+  try {
+    let profile = await readSolo(env.DB, id);
+    const requestId = parsed.data.requestId ?? crypto.randomUUID();
+    const prior = profile.chapters.find(chapter => chapter.id === requestId);
+    if (prior) return NextResponse.json({ ...demoFor(locale), id: prior.recommendation.id, qlooEntityId: prior.recommendation.id, title: prior.recommendation.name, category: prior.recommendation.category, discovery: prior.discovery, mode: "LIVE", memory: { saved: true, chapterId: prior.id, priorChapters: profile.chapters.length - 1, explanation: soloRationale(profile, prior.discovery!.domain, locale), persistence: "D1" }, archetype: profile.archetype });
+    if (!profile.seeds.length) {
+      if (!parsed.data.interests?.length) return NextResponse.json({ error: translate(locale, "solo.error.interest") }, { status: 400 });
+      const seeds: SoloSeed[] = [];
+      for (const interest of parsed.data.interests) {
+        const found = await resolveEntity(base, key, { name: interest.name, type: interest.type, why: interest.reaction || interest.name, confidence: 1, provenance: "explicit" }, "you", calls);
+        if (found) seeds.push({ id: found.id, name: found.name, type: found.type, reaction: interest.reaction, tags: discoveryDomains.flatMap(domain => domain.cues.filter(cue => interest.reaction.toLowerCase().includes(cue))).slice(0, 10) });
+      }
+      if (!seeds.length) return NextResponse.json({ error: translate(locale, "solo.error.notGrounded"), qlooApiCalls: calls }, { status: 422 });
+      profile = await updateSoloSettings(env.DB, id, undefined, seeds);
+    }
+    const positive = profile.chapters.filter(chapter => chapter.experiencedAt && chapter.experienceReviews?.some(review => review.overall === "loved" || review.overall === "liked"));
+    const signals: ResolvedEntity[] = [...profile.seeds.map(seed => ({ id: seed.id, name: seed.name, type: seed.type, participant: "you" as const, confidence: 1, provenance: "explicit" as const, why: seed.reaction || "Selected interest" })),
+      ...positive.map(chapter => ({ id: chapter.recommendation.id, name: chapter.recommendation.name, type: discoveryDomains.find(domain => domain.id === chapter.discovery?.domain)?.type ?? `urn:entity:${chapter.recommendation.category}`, participant: "you" as const, confidence: 1, provenance: "explicit" as const, why: "Positive post-experience reaction" }))];
+    const uniqueSignals = signals.filter((signal, index, all) => all.findIndex(other => other.id === signal.id) === index);
+    const excluded = new Set([...uniqueSignals.map(signal => signal.id), ...profile.chapters.map(chapter => chapter.recommendation.id)]);
+    const directions = soloDirections(profile);
+    const location = parsed.data.location ?? "";
+    const attempts: Array<{ domain: string; score: number; usable: number }> = [];
+    for (const direction of directions) {
+      const verifiedTags = await classificationTags(base, key, direction.id, calls);
+      const raw = await insightCandidates(base, key, uniqueSignals, direction.type, location, calls, verifiedTags);
+      const candidates = raw.filter(entity => !excluded.has(entityId(entity)!) && (verifiedTags.length || fitsDomain(entity, direction.id))).map(entity => ({ entity, category: direction.id }));
+      const enrichment = await enrichCandidates(candidates, { database: env.DB, base, key });
+      const ranking = rankSoloCandidates(enrichment.candidates, profile, direction.id);
+      attempts.push({ domain: direction.id, score: direction.score, usable: ranking.ranked.length });
+      const selected = ranking.ranked[0]?.candidate;
+      if (!selected) continue;
+      const title = entityName(selected.entity)!;
+      const rationale = soloRationale(profile, direction.id, locale);
+      const why = { known: profile.chapters.length ? translate(locale, "solo.why.learned") : translate(locale, "solo.why.first"), new: rationale, fits: translate(locale, "solo.why.grounded", { title }) };
+      const discovery: DiscoveryRecord = { domain: direction.id, status: "suggested", sourceChapterIds: profile.chapters.filter(chapter => chapter.experiencedAt).map(chapter => chapter.id), why, location, categoryEvidence: verifiedTags.length ? `Qloo Insights filter.tags: ${verifiedTags.join(", ")}` : domainEvidence(selected.entity, direction.id)! };
+      const chapter = { id: requestId, pairId: id, scope: "solo" as const, timestamp: new Date().toISOString(), inputs: { you: profile.seeds.map(seed => seed.reaction).join(" "), partner: "" }, entities: uniqueSignals, reactions: [{ person: "you" as const, label: "You", entityIds: uniqueSignals.map(signal => signal.id), tags: profile.seeds.flatMap(seed => seed.tags), dislikes: [] }], recommendation: { id: entityId(selected.entity)!, name: title, category: direction.id, description: adventureCopy(direction.id, title, locale), place: placeLabel(selected.entity, direction.id, locale), rationale }, state: "LIVE" as const, feedback: null, reflection: "", discovery };
+      await saveSoloChapter(env.DB, id, chapter);
+      const response = NextResponse.json({ id: chapter.recommendation.id, qlooEntityId: chapter.recommendation.id, title, category: direction.id, discovery, eyebrow: translate(locale, "api.discovery.eyebrow"), description: chapter.recommendation.description, place: chapter.recommendation.place, detail: translate(locale, "api.discovery.detail"), mode: "LIVE", practicalMetadata: selected.practical, archetype: profile.archetype, reason: rationale, memory: { saved: true, chapterId: chapter.id, priorChapters: profile.chapters.length, explanation: rationale, persistence: "D1" }, trace: { ...demoFor(locale).trace, resolvedEntities: uniqueSignals, qlooApiCalls: calls, candidateCount: raw.length, knownFilteredCount: raw.length - candidates.length + ranking.excluded, soloRanking: { directions, attempts, candidates: ranking.ranked.map(item => ({ id: entityId(item.candidate.entity), score: item.score, familiarity: item.familiarity, novelty: item.novelty })) } } }, { headers: { "Cache-Control": "no-store" } });
+      response.cookies.set(soloCookie, id, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge: 60 * 60 * 24 * 90 });
+      return response;
+    }
+    return NextResponse.json({ error: translate(locale, "api.error.noFresh"), qlooApiCalls: calls, attempts }, { status: 422 });
+  } catch (error) {
+    console.info("together.solo_discovery_error", { message: error instanceof Error ? error.message.slice(0, 160) : "Unknown failure" });
+    return NextResponse.json({ error: translate(locale, "api.error.discoveryService"), qlooApiCalls: calls }, { status: 503 });
+  }
+}
+
 function placeLabel(entity: QlooEntity, category: string, locale: Locale): string {
   const address = entity.properties?.address;
   const city = entity.properties?.geocode?.city;
@@ -465,6 +532,7 @@ export async function POST(request: NextRequest) {
   const bodyRecord = body && typeof body === "object" ? body as Record<string, unknown> : {};
   const locale = normalizeLocale(bodyRecord.locale);
   const demo = demoFor(locale);
+  if (bodyRecord.mode === "solo_discovery") return soloDiscovery(request, bodyRecord);
   if (bodyRecord.mode === "next_discovery") return nextDiscovery(request, bodyRecord);
   const reflectionsInput = Array.isArray(bodyRecord.reflections) ? bodyRecord.reflections : [];
   const reflections = reflectionsInput.flatMap(value => value && typeof value === "object" && typeof (value as { text?: unknown }).text === "string" ? [(value as { text: string }).text.slice(0, 1200)] : []);

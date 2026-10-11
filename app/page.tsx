@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import { ArrowLeft, BookOpen, ChevronRight, Compass, Film, Heart, MapPin, MessageCircleMore, Music2, Sparkles, Users, X } from "lucide-react";
 import { FeedbackButtons, ExplorationTaste, PracticalFeedback, MemoryInvitation, MemoryTimeline, NextDiscovery, OurTaste } from "../components/relationship-memory";
@@ -11,6 +11,8 @@ import { deriveProfile, type Feedback, type MemorySnapshot } from "../lib/relati
 import { ExperienceReviewCard, type ExperienceAction } from "../components/experience-review";
 import { LanguageProvider, LanguageToggle, useLanguage } from "../components/language-provider";
 import { categoryLabel, domainLabel, statusExplanation, statusToken, translate, type Locale } from "../lib/i18n";
+import { SoloApp } from "../components/solo-app";
+import { modeStorageKey, resolveEntryMode, type EntryMode } from "../lib/entry-mode";
 
 type View = "journey" | "taste" | "talk" | "spark" | "reveal" | "return";
 type Participant = { id: "you" | "partner"; label: string; likes: string[]; dislikes: string[]; emotionalContext: string[]; entities: Array<{ name: string; type: string; why: string; confidence: number; provenance: "explicit" | "inferred" }> };
@@ -77,10 +79,21 @@ function createDemoAdventure(locale: Locale): Adventure { return {
 declare global { interface Document { modelContext?: { registerTool: (tool: { name: string; title: string; description: string; inputSchema: Record<string, unknown>; annotations?: Record<string, boolean>; execute: (input: unknown) => unknown }, options?: { signal?: AbortSignal }) => void | Promise<void> } } }
 
 export default function Home() {
-  return <LanguageProvider><TogetherApp/></LanguageProvider>;
+  return <LanguageProvider><ModeEntry/></LanguageProvider>;
 }
 
-function TogetherApp() {
+function ModeEntry() {
+  const { t } = useLanguage();
+  const mode = useSyncExternalStore(subscribeMode, readMode, () => null);
+  const choose = (next: EntryMode | null) => { if (next) localStorage.setItem(modeStorageKey, next); else localStorage.removeItem(modeStorageKey); window.dispatchEvent(new Event("together-mode")); };
+  if (mode === "pair") return <TogetherApp onSwitch={() => choose(null)}/>;
+  if (mode === "solo") return <SoloApp onSwitch={() => choose(null)}/>;
+  return <main className="app-shell"><div className="aurora one"/><div className="aurora two"/><section className="phone-stage"><header className="topbar"><div/><div className="brand"><span><Sparkles size={13}/></span>Together</div><LanguageToggle/></header><div className="screen-frame"><div className="mode-entry"><span className="eyebrow">Together</span><h1>{t("solo.mode.title")}</h1><p>{t("solo.mode.warning")}</p><button className="mode-choice" onClick={() => choose("pair")}><Users size={23}/><strong>{t("solo.mode.pair")}</strong></button><button className="mode-choice" onClick={() => choose("solo")}><Sparkles size={23}/><strong>{t("solo.mode.solo")}</strong></button><small>{t("solo.mode.separate")}</small></div></div></section></main>;
+}
+function subscribeMode(callback: () => void) { window.addEventListener("storage", callback); window.addEventListener("together-mode", callback); return () => { window.removeEventListener("storage", callback); window.removeEventListener("together-mode", callback); }; }
+function readMode(): EntryMode | null { return resolveEntryMode(localStorage.getItem(modeStorageKey)); }
+
+function TogetherApp({ onSwitch }: { onSwitch: () => void }) {
   const { locale, t } = useLanguage();
   const [view, setView] = useState<View>("journey");
   const [conversation, setConversation] = useState<Conversation>(initialConversation);
@@ -242,7 +255,7 @@ function TogetherApp() {
       </header>
       <div className="screen-frame">
         {memoryError && <p role="alert" className="save-error memory-notice">{memoryError}</p>}
-        {view === "journey" && <><div className="memory-surfaces"><NextDiscovery memory={memory} busy={memoryBusy || loading} onDiscover={discoverNext} onTalk={() => setView("talk")} onResume={resumeDiscovery}/></div><Journey planned={planned} adventureTitle={visibleAdventure.title} onTalk={() => setView("talk")} count={memory?.chapters.length ?? 0}/><div className="memory-surfaces"><button className="secondary-action full" onClick={() => setView("taste")}>{t("taste.open", { count: memory?.profile.chapters ?? 0, chapters: t("common.chapters") })}</button><MemoryTimeline memory={memory} busy={memoryBusy || loading} onFeedback={feedbackMemory} onExperience={saveExperience} onReset={resetMemory}/></div></>}
+        {view === "journey" && <><div className="memory-surfaces"><NextDiscovery memory={memory} busy={memoryBusy || loading} onDiscover={discoverNext} onTalk={() => setView("talk")} onResume={resumeDiscovery}/></div><Journey planned={planned} adventureTitle={visibleAdventure.title} onTalk={() => setView("talk")} count={memory?.chapters.length ?? 0}/><div className="memory-surfaces"><button className="secondary-action full" onClick={() => setView("taste")}>{t("taste.open", { count: memory?.profile.chapters ?? 0, chapters: t("common.chapters") })}</button><MemoryTimeline memory={memory} busy={memoryBusy || loading} onFeedback={feedbackMemory} onExperience={saveExperience} onReset={resetMemory}/><button className="text-action" onClick={onSwitch}>{t("solo.mode.switch")}</button></div></>}
         {view === "taste" && <div className="memory-surfaces screen-enter"><OurTaste memory={memory} busy={memoryBusy || loading} onDiscover={discoverNext}/><ExplorationTaste memory={memory}/><MemoryInvitation count={memory?.profile.chapters ?? 0} onTalk={() => setView("talk")}/></div>}
         {view === "talk" && <><p className="memory-disclosure">{t("privacy.disclosure")}</p><Talk value={conversation} setValue={setConversation} error={formError} onContinue={findAdventure}/></>}
         {view === "spark" && <SharedSpark adventure={visibleAdventure} loading={loading} onContinue={() => setView("reveal")} onBack={() => setView("talk")}/>}
