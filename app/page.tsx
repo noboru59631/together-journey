@@ -8,6 +8,7 @@ import { discoveryDomains, type DiscoveryRecord } from "../lib/discovery";
 import type { PreferenceSignal } from "../lib/practical-preferences";
 import { practicalChips, type PracticalMetadata } from "../lib/practical-metadata";
 import { deriveProfile, type Feedback, type MemorySnapshot } from "../lib/relationship-memory";
+import { ExperienceReviewCard, type ExperienceAction } from "../components/experience-review";
 
 type View = "journey" | "taste" | "talk" | "spark" | "reveal" | "return";
 type Participant = { id: "you" | "partner"; label: string; likes: string[]; dislikes: string[]; emotionalContext: string[]; entities: Array<{ name: string; type: string; why: string; confidence: number; provenance: "explicit" | "inferred" }> };
@@ -87,9 +88,6 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [explainOpen, setExplainOpen] = useState(false);
   const [planned, setPlanned] = useState(false);
-  const [note, setNote] = useState("");
-  const [reaction, setReaction] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [formError, setFormError] = useState("");
   const [memory, setMemory] = useState<MemorySnapshot | null>(null);
@@ -127,12 +125,23 @@ export default function Home() {
     finally { setMemoryBusy(false); }
   }, []);
 
+  const saveExperience = useCallback(async (action: ExperienceAction) => {
+    setMemoryBusy(true); setMemoryError("");
+    try {
+      const response = await fetch("/api/memory", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(action) });
+      const result = await response.json() as MemorySnapshot & { error?: string };
+      if (!response.ok) { setMemoryError(result.error ?? "Could not save your reaction."); return false; }
+      setMemory(result); return true;
+    } catch { setMemoryError("Could not save your reaction. Please try again."); return false; }
+    finally { setMemoryBusy(false); }
+  }, []);
+
   const resetMemory = useCallback(async () => {
     setMemoryBusy(true); setMemoryError("");
     try {
       const response = await fetch("/api/memory", { method: "DELETE" });
       if (!response.ok) throw new Error("Reset unavailable");
-      setMemory(await response.json()); setAdventure(demoAdventure); setPlanned(false); setSaved(false); setNote(""); setReaction(null); setView("journey");
+      setMemory(await response.json()); setAdventure(demoAdventure); setPlanned(false); setView("journey");
     } catch { setMemoryError("Could not reset your Journey. Your memory is still here; please try again."); }
     finally { setMemoryBusy(false); }
   }, []);
@@ -144,7 +153,7 @@ export default function Home() {
       setFormError("Add the shared experience and a short reflection from both people.");
       return;
     }
-    setFormError(""); setMemoryError(""); setLoading(true); setPlanned(false); setSaved(false); setSaveError(false); setNote(""); setReaction(null); setView("spark");
+    setFormError(""); setMemoryError(""); setLoading(true); setPlanned(false); setSaveError(false); setView("spark");
     try {
       const response = await fetch("/api/adventure", {
         method: "POST",
@@ -172,7 +181,7 @@ export default function Home() {
 
   const discoverNext = useCallback(async (domain?: string, surprise = false) => {
     if (loading || memoryBusy || !memory) return;
-    setMemoryError(""); setLoading(true); setPlanned(false); setSaved(false); setSaveError(false); setNote(""); setReaction(null); setView("spark");
+    setMemoryError(""); setLoading(true); setPlanned(false); setSaveError(false); setView("spark");
     try {
       const response = await fetch("/api/adventure", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "next_discovery", requestId: crypto.randomUUID(), domain, surprise, location: conversation.location }) });
       if (!response.ok) throw new Error("Discovery unavailable");
@@ -191,31 +200,26 @@ export default function Home() {
       reason: "This is your saved Qloo-grounded chapter. No new recommendation was generated.", question: null,
       memory: { saved: true, chapterId: chapter.id, priorChapters: memory!.chapters.length - 1, explanation: chapter.recommendation.rationale, persistence: "D1" },
       trace: { ...demoAdventure.trace, resolvedEntities: chapter.entities, explanation: { input: "Saved exact-matched Qloo interests.", qloo: `Saved Qloo candidate: ${chapter.recommendation.name}.`, selection: chapter.recommendation.rationale, llm: "Earlier structured reflections; no new interpretation." } } });
-    setPlanned(false); setSaved(false); setSaveError(false); setNote(""); setReaction(null); setView("reveal");
+    setPlanned(false); setSaveError(false); setView("reveal");
   }, [memory]);
 
-  const saveJourney = useCallback(async (nextReaction = "planned") => {
-    setSaved(false); setSaveError(false);
+  const saveJourney = useCallback(async () => {
+    setSaveError(false);
     if (adventure.mode !== "LIVE") return;
-    if (nextReaction !== "planned" && adventure.memory?.chapterId) {
-      const feedback: Feedback = nextReaction === "Loved it" || nextReaction === "Good" ? "liked" : nextReaction === "Never again" ? "not_for_us" : "neutral";
-      const result = await feedbackMemory(adventure.memory.chapterId, feedback, note, undefined, "tried");
-      setSaved(result); setSaveError(!result); return;
-    }
     try {
       const emotionalSignals = adventure.trace.extraction?.participants.flatMap(participant => participant.emotionalContext) ?? [];
       const response = await fetch("/api/journey", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          entityId: adventure.id, qlooEntityId: adventure.qlooEntityId, title: adventure.title, type: adventure.category, reaction: nextReaction, reflection: note,
+          entityId: adventure.id, qlooEntityId: adventure.qlooEntityId, title: adventure.title, type: adventure.category, reaction: "planned", reflection: "",
           culturalSignals: adventure.trace.resolvedEntities.map(entity => entity.name), emotionalSignals, withWhom: conversation.partnerName, discoveredFrom: conversation.experienceTitle,
         }),
       });
       if (!response.ok) throw new Error("Journey save failed");
-      setPlanned(true); setSaved(true);
+      setPlanned(true);
     } catch { setSaveError(true); }
-  }, [adventure, conversation.experienceTitle, conversation.partnerName, note, feedbackMemory]);
+  }, [adventure, conversation.experienceTitle, conversation.partnerName]);
 
   useEffect(() => {
     const context = document.modelContext;
@@ -236,13 +240,13 @@ export default function Home() {
       </header>
       <div className="screen-frame">
         {memoryError && <p role="alert" className="save-error memory-notice">{memoryError}</p>}
-        {view === "journey" && <><div className="memory-surfaces"><NextDiscovery memory={memory} busy={memoryBusy || loading} onDiscover={discoverNext} onTalk={() => setView("talk")} onResume={resumeDiscovery}/></div><Journey planned={planned} adventureTitle={adventure.title} onTalk={() => setView("talk")} count={memory?.chapters.length ?? 0}/><div className="memory-surfaces"><button className="secondary-action full" onClick={() => setView("taste")}>Our Taste · {memory?.profile.chapters ?? 0} chapters</button><MemoryTimeline memory={memory} busy={memoryBusy || loading} onFeedback={feedbackMemory} onReset={resetMemory}/></div></>}
+        {view === "journey" && <><div className="memory-surfaces"><NextDiscovery memory={memory} busy={memoryBusy || loading} onDiscover={discoverNext} onTalk={() => setView("talk")} onResume={resumeDiscovery}/></div><Journey planned={planned} adventureTitle={adventure.title} onTalk={() => setView("talk")} count={memory?.chapters.length ?? 0}/><div className="memory-surfaces"><button className="secondary-action full" onClick={() => setView("taste")}>Our Taste · {memory?.profile.chapters ?? 0} chapters</button><MemoryTimeline memory={memory} busy={memoryBusy || loading} onFeedback={feedbackMemory} onExperience={saveExperience} onReset={resetMemory}/></div></>}
         {view === "taste" && <div className="memory-surfaces screen-enter"><OurTaste memory={memory} busy={memoryBusy || loading} onDiscover={discoverNext}/><ExplorationTaste memory={memory}/><MemoryInvitation count={memory?.profile.chapters ?? 0} onTalk={() => setView("talk")}/></div>}
         {view === "talk" && <><p className="memory-disclosure">Grounded reveals remember both reflections in your anonymous Journey. Reset our journey deletes them. Avoid sensitive personal information.</p><Talk value={conversation} setValue={setConversation} error={formError} onContinue={findAdventure}/></>}
         {view === "spark" && <SharedSpark adventure={adventure} loading={loading} onContinue={() => setView("reveal")} onBack={() => setView("talk")}/>}
         {view === "reveal" && adventure.mode === "LIVE" && adventure.discovery && <div className="memory-surfaces discovery-why"><span className="domain-badge">{discoveryDomains.find(domain => domain.id === adventure.discovery?.domain)?.label}</span><h3>Why this discovery?</h3><p><b>What we know about you two</b>{adventure.discovery.why.known}</p><p><b>Why this is new</b>{adventure.discovery.why.new}</p><p><b>Why it still fits</b>{adventure.discovery.why.fits}</p></div>}
-{view === "reveal" && <>{adventure.memory && <p className="memory-why">{adventure.memory.explanation}</p>}<Reveal adventure={adventure} planned={planned} saveError={saveError} onExplain={() => setExplainOpen(true)} onAccept={() => saveJourney()} onReject={() => setView("talk")} onReturn={() => { setSaved(false); setView("return"); }}/>{adventure.memory?.saved && adventure.memory.chapterId && <div className="memory-surfaces"><p>Does this next adventure feel right? <small>Optional</small></p><FeedbackButtons value={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onChange={feedback => feedbackMemory(adventure.memory!.chapterId!, feedback)}/><PracticalFeedback key={adventure.memory.chapterId} chapterId={adventure.memory.chapterId} category={adventure.category} count={memory?.chapters.length ?? 0} feedback={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onSave={feedbackMemory}/></div>}</>}
-        {view === "return" && <ReturnView adventure={adventure} note={note} setNote={setNote} reaction={reaction} setReaction={setReaction} saved={saved} saveError={saveError} onSave={() => reaction && saveJourney(reaction)} onJourney={() => setView("journey")}/>}
+{view === "reveal" && <>{adventure.memory && <p className="memory-why">{adventure.memory.explanation}</p>}<Reveal adventure={adventure} planned={planned} saveError={saveError} onExplain={() => setExplainOpen(true)} onAccept={() => saveJourney()} onReject={() => setView("talk")} onReturn={() => setView("return")}/>{adventure.memory?.saved && adventure.memory.chapterId && <div className="memory-surfaces"><p>Does this next adventure feel right? <small>Optional</small></p><FeedbackButtons value={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onChange={feedback => feedbackMemory(adventure.memory!.chapterId!, feedback)}/><PracticalFeedback key={adventure.memory.chapterId} chapterId={adventure.memory.chapterId} category={adventure.category} count={memory?.chapters.length ?? 0} feedback={memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)?.feedback ?? null} busy={memoryBusy} onSave={feedbackMemory}/>{memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId) && <ExperienceReviewCard key={adventure.memory.chapterId} chapter={memory.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)!} busy={memoryBusy} onSave={saveExperience}/>}</div>}</>}
+        {view === "return" && <div className="memory-surfaces screen-enter"><Heading eyebrow="AFTER YOUR EXPERIENCE" title="So… how was it?" text={adventure.title}/>{memory?.chapters.find(chapter => chapter.id === adventure.memory?.chapterId) ? <ExperienceReviewCard chapter={memory.chapters.find(chapter => chapter.id === adventure.memory?.chapterId)!} busy={memoryBusy} onSave={saveExperience}/> : <p>A saved LIVE grounded chapter is needed to learn from this experience.</p>}<button className="text-action" onClick={() => setView("journey")}>See our Journey</button></div>}
       </div>
       <nav className="bottom-nav" aria-label="Primary navigation">
         <button className={view === "journey" ? "active" : ""} onClick={() => setView("journey")}><Compass size={21}/><span>Journey</span></button>
@@ -294,11 +298,6 @@ function PracticalFactChips({ metadata }: { metadata?: PracticalMetadata }) {
 
 function Explanation({ adventure, onClose }: { adventure: Adventure; onClose: () => void }) {
   return <div className="modal-backdrop" onClick={onClose}><section className="explain-sheet" role="dialog" aria-modal="true" aria-label="Why this adventure?" onClick={event => event.stopPropagation()}><button className="close" onClick={onClose} aria-label="Close"><X size={18}/></button><span className="overline">{adventure.mode === "LIVE" ? "AUDITABLE LIVE PATH" : "NO LIVE CLAIM"}</span><h2>Why this adventure?</h2><div className="trace-flow"><Trace n="01" title="Conversation Engine" text={adventure.trace.explanation.llm}/><Trace n="02" title="Verified input entities" text={adventure.trace.explanation.input}/><Trace n="03" title="Qloo inference" text={adventure.trace.explanation.qloo} highlight={adventure.mode === "LIVE"}/><Trace n="04" title="Together selection" text={adventure.trace.explanation.selection}/></div>{adventure.trace.unresolvedEntities.length > 0 && <p className="honesty">Not used: {adventure.trace.unresolvedEntities.map(entity => `${entity.name} (${entity.reason})`).join(" · ")}</p>}<p className="reason">{adventure.reason}</p>{adventure.mode === "LIVE" && <p className="honesty">Qloo API: {adventure.trace.qlooApiCalls.map(call => `${call.stage}/${call.category} ${call.status} (${call.resultCount})`).join(" · ")}</p>}<p className="honesty">{adventure.mode === "LIVE" ? "Qloo supplied the revealed candidate. The LLM supplied context, not facts; Together supplied the novelty and practicality choice plus invitation copy." : adventure.mode === "DEMO" ? "OPENAI_API_KEY is not configured. Free-form understanding is not active." : adventure.mode === "NEEDS_INPUT" ? "The LLM ran, but Qloo could not verify enough distinct signals to continue." : "A live dependency failed, so this prepared activity is clearly labeled FALLBACK."}</p></section></div>;
-}
-
-function ReturnView({ adventure, note, setNote, reaction, setReaction, saved, saveError, onSave, onJourney }: { adventure: Adventure; note: string; setNote: (value: string) => void; reaction: string | null; setReaction: (value: string) => void; saved: boolean; saveError: boolean; onSave: () => void; onJourney: () => void }) {
-  const reactions = ["Loved it", "Good", "Meh", "Never again"];
-  return <div className="return screen-enter"><div className="return-photo"><div className="return-art"/><div><span className="eyebrow">AFTER {adventure.title.toUpperCase()}</span><h2>So… how was it?</h2></div></div><div className="reactions">{reactions.map(value => <button key={value} className={reaction === value ? "selected" : ""} onClick={() => setReaction(value)}>{value}</button>)}</div><label className="reflection"><span>Tell me why <small>optional</small></span><textarea value={note} onChange={event => setNote(event.target.value)} placeholder="What stayed with you?"/></label>{saveError && <p role="alert" className="save-error">Could not save to your Journey. Please try again.</p>}{!saved ? <button className="primary-action full" disabled={!reaction} onClick={onSave}>Add this chapter</button> : <div className="saved"><span><Sparkles size={20}/></span><h3>A new node is glowing.</h3><p>Your reaction is saved in the Journey.</p><button className="primary-action full" onClick={onJourney}>See our Journey</button></div>}</div>;
 }
 
 function modeLabel(mode: AdventureMode) { return mode === "LIVE" ? "Qloo LIVE" : mode === "NEEDS_INPUT" ? "Needs a real entity" : mode === "FALLBACK" ? "Fallback activity" : "Demo activity"; }

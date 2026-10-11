@@ -13,7 +13,7 @@ export function loadTypescript(filename, overrides = {}, cache = new Map()) {
   cache.set(filename, exports);
   const source = readFileSync(filename, "utf8");
   const compiled = typescript.transpileModule(source, { compilerOptions: { module: typescript.ModuleKind.CommonJS, target: typescript.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
-  const context = vm.createContext({ exports, URL, AbortSignal, Error, JSON, Set, Map, Promise, Date, crypto: webcrypto, process: { env: {} }, ...overrides,
+  const context = vm.createContext({ exports, URL, AbortSignal, Error, JSON, Set, Map, Promise, Date, TextEncoder, crypto: webcrypto, process: { env: {} }, ...overrides,
     require: moduleName => {
       if (moduleName.startsWith(".")) return loadTypescript(path.resolve(path.dirname(filename), `${moduleName}.ts`), overrides, cache);
       return overrides.require ? overrides.require(moduleName) : requireRepository(moduleName);

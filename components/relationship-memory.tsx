@@ -5,6 +5,7 @@ import { Sparkles } from "lucide-react";
 import type { Feedback, MemorySnapshot } from "../lib/relationship-memory";
 import { discoveryDomains } from "../lib/discovery";
 import { dimensions, labels, learnedPreferences, preferenceLabel, type PreferenceSignal } from "../lib/practical-preferences";
+import { ExperienceReviewCard, type ExperienceAction } from "./experience-review";
 
 export function ExplorationTaste({ memory }: { memory: MemorySnapshot | null }) {
   const learned = learnedPreferences(memory?.practical ?? []);
@@ -61,7 +62,7 @@ export function NextDiscovery({ memory, busy, onDiscover, onTalk, onResume }: { 
   </article>;
 }
 
-export function MemoryTimeline({ memory, busy, onFeedback, onReset }: { memory: MemorySnapshot | null; busy: boolean; onFeedback: (chapterId: string, feedback: Feedback, reflection?: string, preference?: PreferenceSignal) => Promise<boolean>; onReset: () => void }) {
+export function MemoryTimeline({ memory, busy, onFeedback, onExperience, onReset }: { memory: MemorySnapshot | null; busy: boolean; onFeedback: (chapterId: string, feedback: Feedback, reflection?: string, preference?: PreferenceSignal) => Promise<boolean>; onExperience: (action: ExperienceAction) => Promise<boolean>; onReset: () => void }) {
   const [confirmReset, setConfirmReset] = useState(false);
   return <section className="memory-timeline" aria-label="Recent shared journeys">
     <span className="eyebrow">OUR JOURNEY</span><h3>{memory?.chapters.length ? "The chapters we’re learning from" : "Your story starts here"}</h3>
@@ -75,6 +76,7 @@ export function MemoryTimeline({ memory, busy, onFeedback, onReset }: { memory: 
         <p>{chapter.recommendation.rationale}</p><p>A recommendation is not a confirmed visit. Feedback is optional.</p>
       </details>
       <FeedbackButtons value={chapter.feedback} busy={busy} onChange={feedback => onFeedback(chapter.id, feedback)}/>
+      <ExperienceReviewCard chapter={chapter} busy={busy} onSave={onExperience}/>
       {chapter.id === memory.chapters[0]?.id && <PracticalFeedback key={chapter.id} chapterId={chapter.id} category={chapter.recommendation.category} count={memory.chapters.length} feedback={chapter.feedback} busy={busy} onSave={onFeedback}/>}
     </article>)}
     <div className="memory-reset">{confirmReset ? <><p>Delete this pair’s stored history and reactions? This cannot be undone.</p><button className="secondary-action" disabled={busy} onClick={() => { onReset(); setConfirmReset(false); }}>Delete our memory</button><button className="text-action" onClick={() => setConfirmReset(false)}>Keep our Journey</button></> : <button className="text-action" disabled={busy || !memory || memory.persistence !== "D1"} onClick={() => setConfirmReset(true)}>Reset our journey</button>}</div>

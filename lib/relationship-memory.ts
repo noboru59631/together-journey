@@ -1,4 +1,5 @@
 import { domainDirections, explorationHistory, type DiscoveryRecord, type DomainHistory } from "./discovery";
+import { canExperience, experienceContext, experienceExplanation, experienceWeight, type ExperienceReview } from "./post-experience";
 
 export type Person = "you" | "partner";
 export type Feedback = "liked" | "good_surprise" | "neutral" | "not_for_us";
@@ -16,8 +17,10 @@ export type MemoryChapter = {
   feedback: Feedback | null;
   reflection: string;
   discovery?: DiscoveryRecord;
+  experiencedAt?: string;
+  experienceReviews?: ExperienceReview[];
 };
-export type Signal = { tag: string; count: number; chapterIds: string[] };
+export type Signal = { tag: string; count: number; chapterIds: string[]; weight?: number; postExperienceCount?: number };
 export type TasteProfile = {
   chapters: number;
   shared: Signal[];
@@ -60,6 +63,9 @@ export function deriveProfile(chapters: MemoryChapter[]): TasteProfile {
   const unique = [...new Map(chapters.filter(chapter => chapter.state === "LIVE").map(chapter => [chapter.id, chapter])).values()];
   const signals = { you: new Map<string, Set<string>>(), partner: new Map<string, Set<string>>() };
   const sharedChapters = new Map<string, Set<string>>();
+  const scores = { you: new Map<string, number>(), partner: new Map<string, number>() };
+  const experienced = { you: new Map<string, Set<string>>(), partner: new Map<string, Set<string>>() };
+  const masses = { you: new Map<string, number>(), partner: new Map<string, number>() };
   const avoided = new Set<string>();
   for (const chapter of unique) {
     if (chapter.feedback === "not_for_us") avoided.add(chapter.recommendation.id);
@@ -68,20 +74,42 @@ export function deriveProfile(chapters: MemoryChapter[]): TasteProfile {
         const evidence = signals[reaction.person].get(tag) ?? new Set<string>();
         evidence.add(chapter.id);
         signals[reaction.person].set(tag, evidence);
+        scores[reaction.person].set(tag, (scores[reaction.person].get(tag) ?? 0) + 1);
+        masses[reaction.person].set(tag, (masses[reaction.person].get(tag) ?? 0) + 1);
       }
       for (const tag of reaction.dislikes) avoided.add(`${reaction.person}: ${normalizeTag(tag)}`);
     }
+    if (canExperience(chapter) && chapter.experiencedAt) for (const review of chapter.experienceReviews ?? []) {
+      const person = review.person === "A" ? "you" : "partner";
+      if (review.overall === "not_for_me") avoided.add(`${person}: ${chapter.recommendation.id}`);
+      for (const signal of review.taste) {
+        const tag = normalizeTag(signal.tag);
+        const score = signal.sentiment === "positive" ? experienceWeight : signal.sentiment === "negative" ? -experienceWeight : 0;
+        scores[person].set(tag, (scores[person].get(tag) ?? 0) + score);
+        masses[person].set(tag, (masses[person].get(tag) ?? 0) + experienceWeight);
+        const evidence = signals[person].get(tag) ?? new Set<string>();
+        evidence.add(chapter.id); signals[person].set(tag, evidence);
+        const actual = experienced[person].get(tag) ?? new Set<string>();
+        actual.add(chapter.id); experienced[person].set(tag, actual);
+      }
+    }
+  }
+  for (const person of ["you", "partner"] as const) for (const tag of signals[person].keys()) {
+    if ((scores[person].get(tag) ?? 0) / (masses[person].get(tag) ?? 1) < 0.5) signals[person].delete(tag);
   }
   for (const [tag, evidence] of signals.you) {
     const partnerEvidence = signals.partner.get(tag);
     if (partnerEvidence) sharedChapters.set(tag, new Set([...evidence, ...partnerEvidence]));
   }
-  const toSignals = (values: Map<string, Set<string>>) => [...values].map(([tag, evidence]) => ({ tag, count: evidence.size, chapterIds: [...evidence].sort() })).sort((first, second) => second.count - first.count || first.tag.localeCompare(second.tag));
+  const toSignals = (values: Map<string, Set<string>>, person?: Person) => [...values].map(([tag, evidence]) => ({ tag, count: evidence.size, chapterIds: [...evidence].sort(),
+    weight: person ? scores[person].get(tag) ?? 0 : Math.min(scores.you.get(tag) ?? 0, scores.partner.get(tag) ?? 0),
+    postExperienceCount: person ? experienced[person].get(tag)?.size ?? 0 : new Set([...(experienced.you.get(tag) ?? []), ...(experienced.partner.get(tag) ?? [])]).size,
+  })).sort((first, second) => second.weight - first.weight || second.count - first.count || first.tag.localeCompare(second.tag));
   const shared = toSignals(sharedChapters);
   const sharedTags = new Set(shared.map(signal => signal.tag));
   const profile: TasteProfile = {
     chapters: unique.length, shared,
-    different: { you: toSignals(signals.you).filter(signal => !sharedTags.has(signal.tag)), partner: toSignals(signals.partner).filter(signal => !sharedTags.has(signal.tag)) },
+    different: { you: toSignals(signals.you, "you").filter(signal => !sharedTags.has(signal.tag)), partner: toSignals(signals.partner, "partner").filter(signal => !sharedTags.has(signal.tag)) },
     unexplored: [], exploration: explorationHistory(unique),
     avoided: [...avoided].sort(),
   };
@@ -93,6 +121,7 @@ export function memoryContext(chapters: MemoryChapter[]) {
   const profile = deriveProfile(chapters);
   return {
     chapterCount: profile.chapters,
+    actualExperiences: experienceContext(chapters),
     shared: profile.shared.slice(0, 6).map(signal => ({ tag: signal.tag, observations: signal.count })),
     different: { you: profile.different.you.slice(0, 6).map(signal => signal.tag), partner: profile.different.partner.slice(0, 6).map(signal => signal.tag) },
     unexplored: profile.unexplored.map(opportunity => opportunity.label),
@@ -110,9 +139,19 @@ export function memoryExplanation(chapters: MemoryChapter[], category: string) {
   const overlap = shared ? `you both responded to ${shared}` : "your earlier reflections opened different doors";
   const difference = you && partner ? `, while A responded to ${you} and B to ${partner}` : "";
   const newDomain = profile.unexplored.some(opportunity => opportunity.category === category);
-  return `Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and looked for discovery in your still-unexplored ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
+  return `${experienceExplanation(chapters)}${experienceContext(chapters).length ? " " : ""}Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and looked for discovery in your still-unexplored ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
 }
 
 export function historicalEntities(chapters: MemoryChapter[]) {
-  return chapters.filter(chapter => chapter.feedback !== "not_for_us").flatMap(chapter => chapter.entities).filter((entity, index, all) => all.findIndex(other => other.id === entity.id) === index).slice(0, 6);
+  const actual = chapters.filter(chapter => canExperience(chapter) && chapter.experiencedAt).flatMap(chapter => (chapter.experienceReviews ?? [])
+    .filter(review => review.overall === "loved" || review.overall === "liked")
+    .map(review => ({ id: review.entityId, name: review.entityName, type: qlooType(chapter.discovery?.domain ?? chapter.recommendation.category), participant: review.person === "A" ? "you" as const : "partner" as const, confidence: 1, provenance: "explicit" as const, why: "Confirmed positive post-experience reaction" })));
+  const prior = chapters.filter(chapter => chapter.feedback !== "not_for_us").flatMap(chapter => chapter.entities);
+  const eligible = [...actual, ...prior].filter((entity, index, all) => all.findIndex(other => other.id === entity.id && other.participant === entity.participant) === index &&
+    !chapters.flatMap(chapter => chapter.experienceReviews ?? []).some(review => review.entityId === entity.id && review.person === (entity.participant === "you" ? "A" : "B") && review.overall === "not_for_me"));
+  return ["you", "partner"].flatMap(person => eligible.filter(entity => entity.participant === person).slice(0, 3));
+}
+
+function qlooType(domain: string) {
+  return `urn:entity:${["food", "culture", "outdoor"].includes(domain) ? "place" : domain}`;
 }

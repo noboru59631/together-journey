@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { clearMemory, pairCookie, readMemory, updateFeedback, validPairId } from "../../../lib/memory-store";
+import { clearMemory, markExperienced, pairCookie, readMemory, reviewHash, saveExperienceReview, updateFeedback, validPairId } from "../../../lib/memory-store";
 import { deriveProfile } from "../../../lib/relationship-memory";
 import { interpretPreferenceNote, signalSchema, type PreferenceSignal, type PreferenceEvidence } from "../../../lib/practical-preferences";
+import { canExperience, interpretExperience, reviewFingerprint, reviewInputSchema } from "../../../lib/post-experience";
 
 export const runtime = "edge";
 
@@ -27,6 +28,40 @@ function respond(value: unknown, id: string, status = 200) {
 function sameOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
   return !origin || origin === new URL(request.url).origin;
+}
+
+const experienceSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("experienced"), chapterId: z.string().uuid() }).strict(),
+  z.object({ action: z.literal("review"), chapterId: z.string().uuid(), review: reviewInputSchema }).strict(),
+]);
+
+export async function POST(request: NextRequest) {
+  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
+  const parsed = experienceSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Invalid experience reaction" }, { status: 400 });
+  const id = pairId(request);
+  try {
+    if (!env.DB) throw new Error("Storage unavailable");
+    const { chapterId, action } = parsed.data;
+    const snapshot = await readMemory(env.DB, id);
+    const chapter = snapshot.chapters.find(item => item.id === chapterId);
+    if (!chapter || !canExperience(chapter)) return respond({ error: "A saved LIVE grounded chapter is required." }, id, 404);
+    if (action === "experienced") {
+      if (!await markExperienced(env.DB, id, chapterId)) return respond({ error: "Chapter not found" }, id, 404);
+    } else {
+      if (!chapter.experiencedAt) return respond({ error: "Mark We tried this before leaving a reaction." }, id, 409);
+      const input = parsed.data.review;
+      const hash = await reviewFingerprint(input);
+      if ((await reviewHash(env.DB, id, chapterId, input.person))?.hash === hash) return respond(await readMemory(env.DB, id), id);
+      const key = process.env.OPENAI_API_KEY;
+      if ((input.note || input.chips.length) && !key) return respond({ error: "Note interpretation is unavailable. You can still save your overall reaction." }, id, 503);
+      const interpreted = input.note || input.chips.length ? await interpretExperience(input, key!, process.env.OPENAI_MODEL ?? "gpt-4o-mini") : { taste: [], practical: [] };
+      if (!await saveExperienceReview(env.DB, id, chapterId, input, interpreted, hash)) return respond({ error: "Chapter not found" }, id, 404);
+    }
+    return respond(await readMemory(env.DB, id), id);
+  } catch {
+    return respond({ error: "Could not save the experience reaction. Please try again; your previous evidence is unchanged." }, id, 503);
+  }
 }
 
 export async function GET(request: NextRequest) {

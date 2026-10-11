@@ -28,7 +28,7 @@ function chapter(overrides = {}) {
 
 function database() {
   const sqlite = new DatabaseSync(":memory:");
-  for (const migration of ["0000_flat_sue_storm.sql", "0001_dizzy_iron_lad.sql", "0002_crazy_fenris.sql"]) sqlite.exec(readFileSync(new URL(`../drizzle/${migration}`, import.meta.url), "utf8"));
+  for (const migration of JSON.parse(readFileSync(new URL("../drizzle/meta/_journal.json", import.meta.url), "utf8")).entries) sqlite.exec(readFileSync(new URL(`../drizzle/${migration.tag}.sql`, import.meta.url), "utf8"));
   const prepare = sql => ({ bind: (...values) => ({
     async run() { const result = sqlite.prepare(sql).run(...values); return { meta: { changes: Number(result.changes) } }; },
     async first() { return sqlite.prepare(sql).get(...values) ?? null; },

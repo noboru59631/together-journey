@@ -1,4 +1,16 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+export const experienceReviews = sqliteTable("experience_reviews", {
+  pairId: text("pair_id").notNull(), chapterId: text("chapter_id").notNull(), person: text("person").notNull(),
+  entityId: text("entity_id").notNull(), entityName: text("entity_name").notNull(), domain: text("domain").notNull(),
+  overall: text("overall").notNull(), inputHash: text("input_hash").notNull(), reviewedAt: text("reviewed_at").notNull(),
+  source: text("source").notNull().default("post_experience"), weight: integer("weight").notNull().default(4),
+}, table => [uniqueIndex("idx_experience_reviews_person").on(table.pairId, table.chapterId, table.person)]);
+export const experienceReactionSignals = sqliteTable("experience_reaction_signals", {
+  pairId: text("pair_id").notNull(), chapterId: text("chapter_id").notNull(), person: text("person").notNull(),
+  entityId: text("entity_id").notNull(), kind: text("kind").notNull(), signal: text("signal").notNull(),
+  value: text("value").notNull(), evidence: text("evidence").notNull(),
+  source: text("source").notNull().default("post_experience"), weight: integer("weight").notNull().default(4), reviewedAt: text("reviewed_at").notNull(),
+}, table => [uniqueIndex("idx_experience_signals_person").on(table.pairId, table.chapterId, table.person, table.kind, table.signal)]);
 export const candidatePracticalMetadata = sqliteTable("candidate_practical_metadata", {
   entityId: text("entity_id").primaryKey(), payload: text("payload").notNull(),
 });

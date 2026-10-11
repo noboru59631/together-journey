@@ -34,3 +34,10 @@
 .preference-note { display: block; font-size: 12px; margin-top: 12px; }
 .preference-note input { display: block; width: 100%; margin-top: 8px; padding: 10px; border: 1px solid #dedbd4; border-radius: 10px; background: transparent; color: inherit; }
 .practical-fact-chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.practical-fact-chips a{padding:4px 8px;border:1px solid rgba(255,255,255,.3);border-radius:20px;color:inherit;font-size:11px;text-decoration:none;background:rgba(0,0,0,.2)}
+ .experience-review { margin-top: 18px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.1); }
+ .experience-hint { font-size: 12px; line-height: 1.6; opacity: .7; }
+ .experience-people { display: flex; gap: 10px; margin: 12px 0; }
+ .experience-people button { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+ .experience-people small { font-size: 11px; font-weight: 400; }
+ .experience-form h4 { font-size: 14px; margin: 18px 0 10px; }
+ .learned-experience { margin-top: 18px; }

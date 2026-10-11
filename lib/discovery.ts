@@ -1,5 +1,6 @@
 import type { MemoryChapter, TasteProfile } from "./relationship-memory";
 import { rerankCandidates, type PracticalCandidate, type PreferenceState } from "./practical-preferences";
+import { canExperience, experienceExplanation, experienceWeight } from "./post-experience";
 
 export const discoveryDomains = [
   { id: "movie", label: "Movies", type: "urn:entity:movie", cues: ["film", "cinema", "movie", "story", "atmosphere", "immersive"] },
@@ -36,7 +37,12 @@ export function explorationHistory(chapters: MemoryChapter[]): DomainHistory[] {
     const seen = unique.filter(chapter => chapterDomain(chapter) === domain.id);
     return seen.length ? [{ domain: domain.id, count: seen.length, tried: seen.filter(chapter => chapter.discovery?.status === "tried").length,
       lastSeen: seen.map(chapter => chapter.timestamp).sort().at(-1)!,
-      feedback: seen.reduce((total, chapter) => total + (chapter.feedback === "good_surprise" ? 2 : chapter.feedback === "liked" ? 1 : chapter.feedback === "not_for_us" ? -4 : 0), 0) / seen.length }] : [];
+      feedback: seen.reduce((total, chapter) => {
+        const prior = chapter.feedback === "good_surprise" ? 2 : chapter.feedback === "liked" ? 1 : chapter.feedback === "not_for_us" ? -4 : 0;
+        const reviews = canExperience(chapter) && chapter.experiencedAt ? chapter.experienceReviews ?? [] : [];
+        const actual = reviews.reduce((sum, review) => sum + (review.overall === "loved" ? 2 : review.overall === "liked" ? 1 : review.overall === "not_for_me" ? -4 : 0) * experienceWeight, 0);
+        return total + (prior + actual) / (1 + reviews.length * experienceWeight);
+      }, 0) / seen.length }] : [];
   });
 }
 
@@ -65,6 +71,7 @@ export function domainDirections(profile: Pick<TasteProfile, "chapters" | "share
       shared: Math.min(shared.length, 3) * 2, different: Math.min(different.length, 3),
       unexplored: explored ? 0 : surprise ? 5 : 3, repetition: -2 * Math.min(seen?.count ?? 0, 5),
       streak: -4 * Math.min(streak, 3), feedback: seen?.feedback ?? 0, practical: practicalScore,
+      postExperience: 2 * Math.min([...shared, ...different].reduce((total, signal) => total + (signal.postExperienceCount ?? 0), 0), 3),
     };
     return [{ category: domain.id, label: domain.label, type: domain.type, sourceChapterIds,
       evidence: [...new Set([...shared, ...different].map(signal => signal.tag))],
@@ -143,7 +150,7 @@ export function rankDiscoveries<Candidate extends PracticalCandidate & { entity:
 export function discoveryWhy(direction: ReturnType<typeof domainDirections>[number], chapters: MemoryChapter[], candidate: string): DiscoveryWhy {
   const evidence = direction.evidence.slice(0, 2).join(" and ");
   return {
-    known: `Your earlier reflections include ${evidence}. These signals come from ${direction.sourceChapterIds.length} grounded chapter${direction.sourceChapterIds.length === 1 ? "" : "s"}.`,
+    known: experienceExplanation(chapters) || `Your earlier reflections include ${evidence}. These signals come from ${direction.sourceChapterIds.length} grounded chapter${direction.sourceChapterIds.length === 1 ? "" : "s"}.`,
     new: direction.explored ? `A fresh ${direction.label.toLowerCase()} chapter; previous IDs and near-duplicate names were excluded.` : `You have not received a ${direction.label.toLowerCase()} discovery yet. This is a direction to try, not a confirmed preference.`,
     fits: `Qloo returned ${candidate} for your verified cultural interests from both people. Together balanced variety with your available practical evidence.`,
   };

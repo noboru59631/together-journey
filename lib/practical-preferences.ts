@@ -9,7 +9,7 @@ export const labels: Record<Dimension, [string, string]> = {
 };
 export const signalSchema = z.object({ dimension: z.enum(dimensions), value: z.union([z.literal(-1), z.literal(1)]) }).strict();
 export type PreferenceSignal = z.infer<typeof signalSchema>;
-export type PreferenceEvidence = PreferenceSignal & { chapterId: string; source: "explicit_chip" | "free_text"; weight: number; timestamp: string; entityId: string };
+export type PreferenceEvidence = PreferenceSignal & { chapterId: string; source: "explicit_chip" | "free_text" | "post_experience"; weight: number; timestamp: string; entityId: string; person?: "A" | "B" };
 export type PreferenceState = { dimension: Dimension; score: number; count: number; weight: number };
 
 export function preferenceProfile(evidence: PreferenceEvidence[]): PreferenceState[] {

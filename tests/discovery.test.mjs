@@ -25,7 +25,7 @@ function chapter(domain = "movie", id = firstId, timestamp = "2026-10-11T01:00:0
 
 function database() {
   const sqlite = new DatabaseSync(":memory:");
-  for (const migration of ["0000_flat_sue_storm", "0001_dizzy_iron_lad", "0002_crazy_fenris", "0003_thankful_odin", "0004_discovery_history"]) sqlite.exec(readFileSync(new URL(`../drizzle/${migration}.sql`, import.meta.url), "utf8"));
+  for (const migration of JSON.parse(readFileSync(new URL("../drizzle/meta/_journal.json", import.meta.url), "utf8")).entries) sqlite.exec(readFileSync(new URL(`../drizzle/${migration.tag}.sql`, import.meta.url), "utf8"));
   return { sqlite, prepare: sql => ({ bind: (...values) => ({
     async run() { return { meta: { changes: Number(sqlite.prepare(sql).run(...values).changes) } }; },
     async first() { return sqlite.prepare(sql).get(...values) ?? null; },
