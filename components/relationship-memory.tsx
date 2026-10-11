@@ -6,10 +6,11 @@ import type { Feedback, MemorySnapshot } from "../lib/relationship-memory";
 import { discoveryDomains } from "../lib/discovery";
 import { dimensions, labels, learnedPreferences, preferenceLabel, type PreferenceSignal } from "../lib/practical-preferences";
 import { ExperienceReviewCard, type ExperienceAction } from "./experience-review";
+import { memorySignalLabel } from "../lib/preference-memory";
 
 export function ExplorationTaste({ memory }: { memory: MemorySnapshot | null }) {
-  const learned = learnedPreferences(memory?.practical ?? []);
-  return <article className="memory-bucket"><h3>How we like to explore</h3>{learned.length ? <div className="signal-tags">{learned.map(state => <span key={state.dimension}>{preferenceLabel(state)}<small>{state.count} {state.count === 1 ? "signal" : "signals"}</small></span>)}</div> : <p>Still learning. Optional feedback helps us find your comfortable pace.</p>}<p>These are shared requests, not assumptions about either person. Contradictory feedback balances the evidence.</p></article>;
+  const learned = learnedPreferences(memory?.discoveryPractical ?? []);
+  return <article className="memory-bucket"><h3>How we like to explore next</h3>{learned.length ? <div className="signal-tags">{learned.map(state => <span key={state.dimension}>{preferenceLabel(state)}<small>For the next discovery</small></span>)}</div> : <p>Still learning. Optional feedback helps us find your comfortable pace.</p>}<p>Enduring preferences and recent requests both shape this direction. A person’s request does not mean both agree.</p></article>;
 }
 
 export function PracticalFeedback({ chapterId, category, count, feedback, busy, onSave }: { chapterId: string; category: string; count: number; feedback: Feedback | null; busy: boolean; onSave: (chapterId: string, feedback: Feedback, reflection?: string, preference?: PreferenceSignal) => Promise<boolean> }) {
@@ -33,10 +34,15 @@ export function FeedbackButtons({ value, busy, onChange }: { value: Feedback | n
 
 export function OurTaste({ memory, busy = false, onDiscover }: { memory: MemorySnapshot | null; busy?: boolean; onDiscover?: (domain?: string, surprise?: boolean) => void }) {
   const profile = memory?.profile;
+  const pairStable = memory?.layers?.longTerm.filter(item => item.person === "pair") ?? [];
+  const stable = memory?.layers?.longTerm.filter(item => item.person === "pair" || !pairStable.some(shared => shared.kind === item.kind && shared.signal === item.signal)) ?? [];
+  const recent = memory?.layers?.recentContext ?? [];
   return <section className="taste-memory" aria-label="Our Taste">
     <span className="eyebrow">OUR TASTE</span><h2>Same world. Different doors.</h2>
     {!profile?.chapters ? <p>Your first grounded journey will begin your taste memory. Nothing has been learned yet.</p> : <>
       <p>From {profile.chapters} grounded {profile.chapters === 1 ? "chapter" : "chapters"}. These signals evolve as you share more.</p>
+      <article className="memory-bucket"><h3>What seems to stick</h3>{stable.length ? <div className="signal-tags">{stable.slice(0, 8).map(item => <span key={`${item.person}:${item.kind}:${item.signal}`}>{item.person === "pair" ? "Both" : `Person ${item.person}`} · {memorySignalLabel(item)}<small>{item.chapterCount} {item.chapterCount === 1 ? "chapter · explicitly stated" : "chapters · recurring evidence"}</small></span>)}</div> : <p>Still learning. One reaction alone does not establish a lasting preference.</p>}</article>
+      <article className="memory-bucket"><h3>What mattered recently</h3>{recent.length ? recent.slice(0, 6).map(item => <p key={`${item.chapterId}:${item.person}:${item.kind}:${item.signal}`}>Person {item.person} · {item.evidence}{item.futurePreference ? " · For next time" : ""}</p>) : <p>No recent context to carry forward.</p>}<p>Temporary context from the latest three experiences, for up to 30 days. Shared and Different below describe observations, not stable labels.</p></article>
       <article className="memory-bucket"><h3>Shared</h3>{profile.shared.length ? <div className="signal-tags">{profile.shared.slice(0, 8).map(signal => <span key={signal.tag}>{signal.tag}<small>{signal.count} {signal.count === 1 ? "chapter" : "chapters"}</small></span>)}</div> : <p>Different reasons still matter. Shared wording will emerge with more reflections.</p>}</article>
       <article className="memory-bucket"><h3>Different</h3><div className="different-columns">{(["you", "partner"] as const).map(person => <div key={person}><b>{person === "you" ? "A · You" : "B · Partner"}</b><div className="signal-tags">{profile.different[person].slice(0, 6).map(signal => <span key={signal.tag}>{signal.tag}<small>{signal.count} chapters</small></span>)}</div></div>)}</div><p>Different emphasis, not a compatibility judgment.</p></article>
       <article className="memory-bucket"><h3>Unexplored</h3><p>Connected directions from your earlier reflections. Qloo must return a matching candidate before any reveal.</p>

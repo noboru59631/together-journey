@@ -1,5 +1,6 @@
 import { domainDirections, explorationHistory, type DiscoveryRecord, type DomainHistory } from "./discovery";
 import { canExperience, experienceContext, experienceExplanation, experienceWeight, type ExperienceReview } from "./post-experience";
+import { derivePreferenceMemory, layeredMemoryExplanation, type PreferenceMemory } from "./preference-memory";
 
 export type Person = "you" | "partner";
 export type Feedback = "liked" | "good_surprise" | "neutral" | "not_for_us";
@@ -29,7 +30,7 @@ export type TasteProfile = {
   exploration: DomainHistory[];
   avoided: string[];
 };
-export type MemorySnapshot = { chapters: MemoryChapter[]; profile: TasteProfile; practical?: import("./practical-preferences").PreferenceState[]; asOf?: string; persistence: "D1" | "unavailable" };
+export type MemorySnapshot = { chapters: MemoryChapter[]; profile: TasteProfile; practical?: import("./practical-preferences").PreferenceState[]; discoveryPractical?: import("./practical-preferences").PreferenceState[]; layers?: PreferenceMemory; asOf?: string; persistence: "D1" | "unavailable" };
 
 export function normalizeTag(value: string) {
   return value.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 100);
@@ -117,11 +118,20 @@ export function deriveProfile(chapters: MemoryChapter[]): TasteProfile {
   return profile;
 }
 
+export function discoveryTasteProfile(chapters: MemoryChapter[]) {
+  const layers = derivePreferenceMemory(chapters);
+  return deriveProfile(chapters.map(chapter => ({ ...chapter, experienceReviews: chapter.experienceReviews?.map(review => ({ ...review, taste: review.taste.filter(signal =>
+    layers.longTerm.some(item => item.person === review.person && item.kind === "taste" && item.signal === signal.tag) ||
+    layers.recentContext.some(item => item.chapterId === chapter.id && item.person === review.person && item.kind === "taste" && item.signal === signal.tag)) })) })));
+}
+
 export function memoryContext(chapters: MemoryChapter[]) {
-  const profile = deriveProfile(chapters);
+  const profile = discoveryTasteProfile(chapters);
   return {
     chapterCount: profile.chapters,
     actualExperiences: experienceContext(chapters),
+    longTerm: derivePreferenceMemory(chapters).longTerm,
+    recentContext: derivePreferenceMemory(chapters).recentContext,
     shared: profile.shared.slice(0, 6).map(signal => ({ tag: signal.tag, observations: signal.count })),
     different: { you: profile.different.you.slice(0, 6).map(signal => signal.tag), partner: profile.different.partner.slice(0, 6).map(signal => signal.tag) },
     unexplored: profile.unexplored.map(opportunity => opportunity.label),
@@ -132,14 +142,14 @@ export function memoryContext(chapters: MemoryChapter[]) {
 
 export function memoryExplanation(chapters: MemoryChapter[], category: string) {
   if (!chapters.length) return "This is your first chapter. Together will remember your two reflections after this grounded reveal.";
-  const profile = deriveProfile(chapters);
+  const profile = discoveryTasteProfile(chapters);
   const shared = profile.shared.slice(0, 2).map(signal => signal.tag).join(" and ");
   const you = profile.different.you.slice(0, 2).map(signal => signal.tag).join(" and ");
   const partner = profile.different.partner.slice(0, 2).map(signal => signal.tag).join(" and ");
   const overlap = shared ? `you both responded to ${shared}` : "your earlier reflections opened different doors";
   const difference = you && partner ? `, while A responded to ${you} and B to ${partner}` : "";
   const newDomain = profile.unexplored.some(opportunity => opportunity.category === category);
-  return `${experienceExplanation(chapters)}${experienceContext(chapters).length ? " " : ""}Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and looked for discovery in your still-unexplored ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
+  return `${layeredMemoryExplanation(chapters)} ${experienceExplanation(chapters)}${experienceContext(chapters).length ? " " : ""}Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and looked for discovery in your still-unexplored ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
 }
 
 export function historicalEntities(chapters: MemoryChapter[]) {

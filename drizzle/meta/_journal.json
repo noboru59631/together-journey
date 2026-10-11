@@ -43,6 +43,13 @@
       "when": 1791715700347,
       "tag": "0005_many_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791719858771,
+      "tag": "0006_open_rick_jones",
+      "breakpoints": true
     }
   ]
 }

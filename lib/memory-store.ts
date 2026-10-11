@@ -1,6 +1,7 @@
 import { deriveProfile, type Feedback, type MemoryChapter, type MemorySnapshot } from "./relationship-memory";
 import { preferenceProfile, type PreferenceEvidence, type PreferenceSignal } from "./practical-preferences";
 import { canExperience, experienceWeight, interpretedReviewSchema, supportedReactionSignals, type ExperienceReview, type InterpretedReview, type ReviewInput } from "./post-experience";
+import { derivePreferenceMemory, layeredPracticalProfile, memoryPolicy } from "./preference-memory";
 
 export const pairCookie = "together_journey";
 export const validPairId = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
@@ -12,14 +13,17 @@ export async function readMemory(database: D1Database, pairId: string): Promise<
   const result = await database.prepare("SELECT payload, feedback, reflection FROM pair_memories WHERE pair_id = ? ORDER BY created_at DESC, id DESC LIMIT 100").bind(pairId).all<{ payload: string; feedback: Feedback | null; reflection: string }>();
   const chapters = result.results.map(row => ({ ...JSON.parse(row.payload) as MemoryChapter, feedback: row.feedback, reflection: row.reflection }));
   const reviews = await database.prepare("SELECT chapter_id AS chapterId, entity_id AS entityId, entity_name AS entityName, domain, person, overall, reviewed_at AS reviewedAt, source, weight FROM experience_reviews WHERE pair_id = ?").bind(pairId).all<ExperienceReview>();
-  const signals = await database.prepare("SELECT chapter_id AS chapterId, person, kind, signal, value, evidence FROM experience_reaction_signals WHERE pair_id = ?").bind(pairId).all<{ chapterId: string; person: string; kind: string; signal: string; value: string; evidence: string }>();
+  const signals = await database.prepare("SELECT chapter_id AS chapterId, person, kind, signal, value, evidence, signal_class AS signalClass, context_marker AS contextMarker, future_preference AS futurePreference FROM experience_reaction_signals WHERE pair_id = ?").bind(pairId).all<{ chapterId: string; person: string; kind: string; signal: string; value: string; evidence: string; signalClass: string; contextMarker: string | null; futurePreference: number }>();
   for (const chapter of chapters) chapter.experienceReviews = reviews.results.filter(review => review.chapterId === chapter.id).map(review => ({ ...review, ...supportedReactionSignals(interpretedReviewSchema.parse({
-    taste: signals.results.filter(signal => signal.chapterId === chapter.id && signal.person === review.person && signal.kind === "taste").map(signal => ({ tag: signal.signal, sentiment: signal.value, evidence: signal.evidence })),
-    practical: signals.results.filter(signal => signal.chapterId === chapter.id && signal.person === review.person && signal.kind === "practical").map(signal => ({ dimension: signal.signal, value: Number(signal.value), evidence: signal.evidence })),
+    taste: signals.results.filter(signal => signal.chapterId === chapter.id && signal.person === review.person && signal.kind === "taste").map(signal => ({ tag: signal.signal, sentiment: signal.value, evidence: signal.evidence, signalClass: signal.signalClass, contextMarker: signal.contextMarker, futurePreference: Boolean(signal.futurePreference) })),
+    practical: signals.results.filter(signal => signal.chapterId === chapter.id && signal.person === review.person && signal.kind === "practical").map(signal => ({ dimension: signal.signal, value: Number(signal.value), evidence: signal.evidence, signalClass: signal.signalClass, contextMarker: signal.contextMarker, futurePreference: Boolean(signal.futurePreference) })),
   })) }));
   const preferences = await database.prepare("SELECT dimension, value, weight, source, timestamp, chapter_id AS chapterId, entity_id AS entityId FROM practical_evidence WHERE pair_id = ?").bind(pairId).all<PreferenceEvidence>();
   const actualPreferences: PreferenceEvidence[] = chapters.filter(chapter => canExperience(chapter) && chapter.experiencedAt).flatMap(chapter => (chapter.experienceReviews ?? []).flatMap(review => review.practical.map(signal => ({ ...signal, chapterId: chapter.id, entityId: review.entityId, person: review.person, timestamp: review.reviewedAt, source: "post_experience" as const, weight: experienceWeight }))));
-  return { chapters, profile: deriveProfile(chapters), practical: preferenceProfile([...preferences.results, ...actualPreferences]), asOf: new Date().toISOString(), persistence: "D1" };
+  const asOf = new Date().toISOString();
+  const layers = derivePreferenceMemory(chapters, asOf);
+  await database.prepare("INSERT INTO preference_memory_layers (pair_id, policy_version, payload, derived_at) SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM pair_sessions WHERE id = ? AND revoked_at IS NULL) ON CONFLICT(pair_id) DO UPDATE SET policy_version = excluded.policy_version, payload = excluded.payload, derived_at = excluded.derived_at").bind(pairId, memoryPolicy.version, JSON.stringify(layers), asOf, pairId).run();
+  return { chapters, profile: deriveProfile(chapters), practical: preferenceProfile([...preferences.results, ...actualPreferences]), discoveryPractical: layeredPracticalProfile(layers, preferenceProfile(preferences.results)), layers, asOf, persistence: "D1" };
 }
 
 export async function markExperienced(database: D1Database, pairId: string, chapterId: string) {
@@ -45,10 +49,11 @@ export async function saveExperienceReview(database: D1Database, pairId: string,
     database.prepare("DELETE FROM experience_reaction_signals WHERE pair_id = ? AND chapter_id = ? AND person = ?").bind(pairId, chapterId, input.person),
   ];
   const signalRows = [
-    ...parsed.taste.map(signal => ({ kind: "taste", signal: signal.tag, value: signal.sentiment, evidence: signal.evidence })),
-    ...parsed.practical.map(signal => ({ kind: "practical", signal: signal.dimension, value: String(signal.value), evidence: signal.evidence })),
+    ...parsed.taste.map(signal => ({ ...signal, kind: "taste", signal: signal.tag, value: signal.sentiment })),
+    ...parsed.practical.map(signal => ({ ...signal, kind: "practical", signal: signal.dimension, value: String(signal.value) })),
   ];
-  for (const signal of signalRows) statements.push(database.prepare(`INSERT INTO experience_reaction_signals (pair_id, chapter_id, person, entity_id, kind, signal, value, evidence, source, weight, reviewed_at) SELECT ?, ?, ?, json_extract(payload, '$.recommendation.id'), ?, ?, ?, ?, 'post_experience', ?, ? ${guard}`).bind(pairId, chapterId, input.person, signal.kind, signal.signal, signal.value, signal.evidence, experienceWeight, timestamp, pairId, chapterId, pairId));
+  for (const signal of signalRows) statements.push(database.prepare(`INSERT INTO experience_reaction_signals (pair_id, chapter_id, person, entity_id, kind, signal, value, evidence, source, weight, reviewed_at, signal_class, context_marker, future_preference, expires_at) SELECT ?, ?, ?, json_extract(payload, '$.recommendation.id'), ?, ?, ?, ?, 'post_experience', ?, ?, ?, ?, ?, ? ${guard}`).bind(pairId, chapterId, input.person, signal.kind, signal.signal, signal.value, signal.evidence, experienceWeight, timestamp, signal.signalClass, signal.contextMarker, signal.futurePreference ? 1 : 0, signal.signalClass === "stable_preference" ? null : new Date(Date.parse(chapter.experiencedAt) + memoryPolicy.contextDays * 86400000).toISOString(), pairId, chapterId, pairId));
+  statements.push(database.prepare("DELETE FROM preference_memory_layers WHERE pair_id = ?").bind(pairId));
   const [result] = await database.batch(statements);
   return result.meta.changes > 0;
 }
@@ -77,6 +82,7 @@ export async function clearMemory(database: D1Database, pairId: string) {
     database.prepare("DELETE FROM practical_evidence WHERE pair_id = ?").bind(pairId),
     database.prepare("DELETE FROM experience_reaction_signals WHERE pair_id = ?").bind(pairId),
     database.prepare("DELETE FROM experience_reviews WHERE pair_id = ?").bind(pairId),
+    database.prepare("DELETE FROM preference_memory_layers WHERE pair_id = ?").bind(pairId),
     database.prepare("DELETE FROM experiences WHERE journey_id = ?").bind(pairId),
     database.prepare("DELETE FROM connections WHERE journey_id = ?").bind(pairId),
   ]);

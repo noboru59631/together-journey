@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { pairCookie, readMemory, saveMemory, validPairId } from "../../../lib/memory-store";
-import { createChapter, deriveProfile, historicalEntities, memoryContext, memoryExplanation, type MemorySnapshot } from "../../../lib/relationship-memory";
+import { createChapter, deriveProfile, discoveryTasteProfile, historicalEntities, memoryContext, memoryExplanation, type MemorySnapshot } from "../../../lib/relationship-memory";
 import { rerankCandidates } from "../../../lib/practical-preferences";
 import { enrichCandidates } from "../../../lib/practical-metadata";
 import { discoveryDomains, domainDirections, discoveryWhy, domainEvidence, fitsDomain, placeClassificationTags, rankDiscoveries, type DiscoveryDomain, type DiscoveryRecord } from "../../../lib/discovery";
@@ -381,7 +381,7 @@ async function nextDiscovery(request: NextRequest, body: Record<string, unknown>
     if (!env.DB) throw new Error("Storage unavailable");
     memory = await readMemory(env.DB, pairId);
   } catch { return fallback("Journey history is unavailable.", [], null, null); }
-  const directions = domainDirections(memory.profile, memory.chapters, memory.practical ?? [], body.surprise === true);
+  const directions = domainDirections(discoveryTasteProfile(memory.chapters), memory.chapters, memory.discoveryPractical ?? [], body.surprise === true);
   if (!directions.length) return NextResponse.json({ ...demo, mode: "NEEDS_INPUT", id: "needs-first-chapter", title: "Start with something real", description: "Share one experience and both reflections first. Your verified interests will open the next direction.", reason: "There is no usable grounded pair history yet.", question: "What did you each enjoy in a film, song, book or place?" });
   const requested = cleanString(body.domain, 40);
   if (requested && !directions.some(direction => direction.category === requested)) return NextResponse.json({ error: "This direction has no supported evidence path for your pair." }, { status: 400 });
@@ -419,7 +419,7 @@ async function nextDiscovery(request: NextRequest, body: Record<string, unknown>
       const raw = await insightCandidates(base, key, signals, direction.type, location, calls, verifiedTags);
       const candidates = raw.filter(entity => !excluded.has(entityId(entity)!) && (verifiedTags.length || fitsDomain(entity, direction.category))).map(entity => ({ entity, category: direction.category }));
       const enrichment = await enrichCandidates(candidates, { database: env.DB!, base, key });
-      const ranking = rankDiscoveries(enrichment.candidates, memory.chapters, memory.practical ?? []);
+      const ranking = rankDiscoveries(enrichment.candidates, memory.chapters, memory.discoveryPractical ?? []);
       attempts.push({ domain: direction.category, score: direction.score, contributors: direction.contributors, usable: ranking.ranked.length });
       const selected = ranking.ranked[0]?.candidate;
       if (!selected) continue;
@@ -440,7 +440,7 @@ async function nextDiscovery(request: NextRequest, body: Record<string, unknown>
       }
       return respond(chapter, { qlooApiCalls: calls, candidateCount: raw.length, knownFilteredCount: raw.length - candidates.length + ranking.excluded,
         candidateCategories: [{ category: direction.category, count: raw.length, samples: candidates.slice(0, 3).map(candidate => entityName(candidate.entity)!) }],
-        discoveryRanking: { directions, attempts, candidates: ranking.ranked.map(item => ({ id: entityId(item.candidate.entity), score: item.score, familiarity: item.familiarity, novelty: item.novelty, practical: item.contributors })) }, categoryEvidence, practicalEnrichment: enrichment.trace }, selected.practical);
+        preferenceMemory: { longTerm: memory.layers?.longTerm, recentContext: memory.layers?.recentContext, practical: memory.discoveryPractical }, discoveryRanking: { directions, attempts, candidates: ranking.ranked.map(item => ({ id: entityId(item.candidate.entity), score: item.score, familiarity: item.familiarity, novelty: item.novelty, practical: item.contributors })) }, categoryEvidence, practicalEnrichment: enrichment.trace }, selected.practical);
     }
     return fallback("Qloo returned no fresh candidate with evidence for the selected directions.", [], null, null, { qlooApiCalls: calls });
   } catch (error) {
@@ -552,7 +552,7 @@ export async function POST(request: NextRequest) {
     const preferred = ordered.filter(candidate => !discouraged.has(candidate.category));
     const baseline = [...preferred, ...ordered.filter(candidate => discouraged.has(candidate.category))];
     const enrichment = await enrichCandidates(baseline, { database: env.DB, base, key: qlooKey });
-    const practicalRanking = rerankCandidates(enrichment.candidates, memory.practical ?? []);
+    const practicalRanking = rerankCandidates(enrichment.candidates, memory.discoveryPractical ?? []);
     const selected = practicalRanking.ranked[0]?.candidate;
     if (!selected) return fallback(available.length ? "Every Qloo candidate is already in this Journey." : "Qloo returned no usable cross-domain candidate.", reflections, extraction, model, { resolvedEntities, unresolvedEntities, candidateCategories, qlooApiCalls });
 

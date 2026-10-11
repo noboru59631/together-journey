@@ -89,7 +89,7 @@ test("strict note/chip interpretation uses store false, validated enums and exac
   assert.equal(body.store, false); assert.equal(body.text.format.strict, true); assert.equal(body.text.format.schema.additionalProperties, false);
   assert.ok(body.input[0].content.includes("do NOT infer outdoors, quiet"));
   const chipModule = load("../lib/post-experience.ts", { fetch: async (_url, options) => {
-    assert.match(JSON.parse(options.body).input[1].content, /Less crowded next time/);
+    assert.match(JSON.parse(options.body).input.at(-1).content, /Less crowded next time/);
     return { ok: true, json: async () => ({ output_text: JSON.stringify({ taste: [], practical: [{ dimension: "crowds", value: -1, evidence: "Less crowded next time" }] }) }) };
   } });
   assert.equal((await chipModule.interpretExperience({ ...inputA, note: "", chips: ["crowds"] }, "fixture", "fixture")).practical.length, 1);
@@ -118,7 +118,7 @@ test("verbatim crowd evidence cannot support an invented outdoor dislike or quie
     await seed(db); await store.markExperienced(db, pairId, chapterId);
     await store.saveExperienceReview(db, pairId, chapterId, inputA, { ...signalsA, taste: [...signalsA.taste, { tag: "outdoors", sentiment: "negative", evidence: "it was too crowded" }] }, "guarded");
     assert.equal((await store.readMemory(db, pairId)).chapters[0].experienceReviews[0].taste.length, 1);
-    db.sqlite.prepare("INSERT INTO experience_reaction_signals VALUES (?, ?, 'A', 'grounded-cafe', 'taste', 'outdoors', 'negative', 'it was too crowded', 'post_experience', 4, '2026-10-11T01:00:00Z')").run(pairId, chapterId);
+    db.sqlite.prepare("INSERT INTO experience_reaction_signals (pair_id, chapter_id, person, entity_id, kind, signal, value, evidence, source, weight, reviewed_at) VALUES (?, ?, 'A', 'grounded-cafe', 'taste', 'outdoors', 'negative', 'it was too crowded', 'post_experience', 4, '2026-10-11T01:00:00Z')").run(pairId, chapterId);
     assert.equal((await store.readMemory(db, pairId)).chapters[0].experienceReviews[0].taste.length, 1);
   } finally { db.sqlite.close(); }
 });
@@ -127,7 +127,7 @@ test("A-only, B later, grounding, retry idempotency, edit replacement and atomic
   const db = database(); let providerCalls = 0; let fail = false;
   const route = reviewRoute(db, async (_url, options) => {
     providerCalls += 1;
-    const content = JSON.parse(options.body).input[1].content;
+    const content = JSON.parse(options.body).input.at(-1).content;
     return { ok: !fail, json: async () => ({ output_text: JSON.stringify(content.includes("atmosphere") ? signalsA : signalsB) }) };
   });
   try {
@@ -149,7 +149,7 @@ test("A-only, B later, grounding, retry idempotency, edit replacement and atomic
     assert.equal(response.value.profile.shared.find(signal => signal.tag === "atmosphere").weight, 1);
     const learned = experience.whatWeLearned(response.value.chapters[0].experienceReviews);
     assert.ok(learned.includes("A enjoyed the atmosphere.")); assert.ok(learned.includes("B enjoyed the music."));
-    assert.ok(learned.some(line => line.includes("A preferred less crowded"))); assert.ok(learned.some(line => line.includes("B preferred quieter")));
+    assert.ok(learned.some(line => line.includes("A reacted toward less crowded"))); assert.ok(learned.some(line => line.includes("B preferred quieter")));
     assert.ok(!learned.some(line => line.includes("both")));
     assert.equal(response.value.practical.find(state => state.dimension === "crowds").score, -2);
     const stored = db.sqlite.prepare("SELECT * FROM experience_reviews WHERE person = 'A'").get();
@@ -181,7 +181,7 @@ test("actual signals outweigh stated taste, distinguish explicit indifference, a
     assert.ok(experience.whatWeLearned(snapshot.chapters[0].experienceReviews).includes("You both enjoyed the atmosphere."));
     assert.ok(experience.whatWeLearned(snapshot.chapters[0].experienceReviews).some(line => /B enjoyed the music; A felt indifferent/.test(line)));
     const direction = discovery.domainDirections(snapshot.profile, snapshot.chapters).find(item => item.category === "culture");
-    assert.equal(direction.contributors.postExperience, 2);
+    assert.equal(direction.contributors.postExperience, 1);
     assert.ok(!snapshot.profile.unexplored.some(item => item.category === "food"));
     await store.saveExperienceReview(db, pairId, chapterId, inputA, { taste: [{ tag: "atmosphere", sentiment: "negative", evidence: "Disliked atmosphere" }], practical: [] }, "third");
     assert.ok(!(await store.readMemory(db, pairId)).profile.shared.some(signal => signal.tag === "atmosphere"));

@@ -1,4 +1,8 @@
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+export const preferenceMemoryLayers = sqliteTable("preference_memory_layers", {
+  pairId: text("pair_id").primaryKey(), policyVersion: integer("policy_version").notNull(),
+  payload: text("payload").notNull(), derivedAt: text("derived_at").notNull(),
+});
 export const experienceReviews = sqliteTable("experience_reviews", {
   pairId: text("pair_id").notNull(), chapterId: text("chapter_id").notNull(), person: text("person").notNull(),
   entityId: text("entity_id").notNull(), entityName: text("entity_name").notNull(), domain: text("domain").notNull(),
@@ -9,6 +13,8 @@ export const experienceReactionSignals = sqliteTable("experience_reaction_signal
   pairId: text("pair_id").notNull(), chapterId: text("chapter_id").notNull(), person: text("person").notNull(),
   entityId: text("entity_id").notNull(), kind: text("kind").notNull(), signal: text("signal").notNull(),
   value: text("value").notNull(), evidence: text("evidence").notNull(),
+  signalClass: text("signal_class").notNull().default("uncertain"), contextMarker: text("context_marker"),
+  futurePreference: integer("future_preference").notNull().default(0), expiresAt: text("expires_at"),
   source: text("source").notNull().default("post_experience"), weight: integer("weight").notNull().default(4), reviewedAt: text("reviewed_at").notNull(),
 }, table => [uniqueIndex("idx_experience_signals_person").on(table.pairId, table.chapterId, table.person, table.kind, table.signal)]);
 export const candidatePracticalMetadata = sqliteTable("candidate_practical_metadata", {
