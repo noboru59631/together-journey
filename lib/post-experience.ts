@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { MemoryChapter } from "./relationship-memory";
 import { dimensions, labels, type PreferenceSignal } from "./practical-preferences";
+import { translate, type Locale } from "./i18n";
 
 export const experienceWeight = 4;
 export const overallReactions = ["loved", "liked", "okay", "not_for_me"] as const;
@@ -12,6 +13,14 @@ export const experienceChips = {
   nature: "Loved the nature", art: "Loved the art", crowds: "Less crowded next time", quiet: "Quieter next time",
   budget: "Less expensive next time", pace: "More relaxed next time",
 } as const;
+
+export function overallLabel(value: typeof overallReactions[number], locale: Locale = "en") {
+  return translate(locale, value === "loved" ? "overall.loved" : value === "liked" ? "overall.liked" : value === "okay" ? "overall.okay" : "overall.notForMe");
+}
+
+export function experienceChipLabel(value: keyof typeof experienceChips, locale: Locale = "en") {
+  return translate(locale, `review.${value}`);
+}
 const chipKeys = Object.keys(experienceChips) as Array<keyof typeof experienceChips>;
 export const reviewInputSchema = z.object({
   person: z.enum(["A", "B"]), overall: z.enum(overallReactions), note: z.string().trim().max(1000).default(""),
@@ -137,22 +146,23 @@ export async function interpretExperience(input: ReviewInput, apiKey: string, mo
   });
 }
 
-export function whatWeLearned(reviews: ExperienceReview[]): string[] {
+export function whatWeLearned(reviews: ExperienceReview[], locale: Locale = "en"): string[] {
   const personA = reviews.find(review => review.person === "A"), personB = reviews.find(review => review.person === "B");
   if (!personA || !personB) return [];
   const lines: string[] = [];
   for (const tag of tasteTags) {
     const first = personA.taste.find(signal => signal.tag === tag)?.sentiment;
     const second = personB.taste.find(signal => signal.tag === tag)?.sentiment;
-    if (first === "positive" && second === "positive") lines.push(`You both enjoyed the ${tag}.`);
-    else if (first === "positive" && second && second !== "positive") lines.push(`A enjoyed the ${tag}; B ${second === "negative" ? "did not" : "felt indifferent"}.`);
-    else if (second === "positive" && first && first !== "positive") lines.push(`B enjoyed the ${tag}; A ${first === "negative" ? "did not" : "felt indifferent"}.`);
-    else if (first === "positive") lines.push(`A enjoyed the ${tag}.`);
-    else if (second === "positive") lines.push(`B enjoyed the ${tag}.`);
-    else if (first === "negative" && second === "negative") lines.push(`Neither of you enjoyed the ${tag}.`);
+    const aspect = locale === "ja" ? ({ atmosphere: "雰囲気", music: "音楽", food: "食", story: "物語", nature: "自然", art: "アート", pace: "ペース", outdoors: "屋外" } as const)[tag] : tag;
+    if (first === "positive" && second === "positive") lines.push(locale === "ja" ? `ふたりとも${aspect}を楽しみました。` : `You both enjoyed the ${aspect}.`);
+    else if (first === "positive" && second && second !== "positive") lines.push(locale === "ja" ? `Aは${aspect}を楽しみ、Bは${second === "negative" ? "合わないと感じました" : "特に重視しませんでした"}。` : `A enjoyed the ${aspect}; B ${second === "negative" ? "did not" : "felt indifferent"}.`);
+    else if (second === "positive" && first && first !== "positive") lines.push(locale === "ja" ? `Bは${aspect}を楽しみ、Aは${first === "negative" ? "合わないと感じました" : "特に重視しませんでした"}。` : `B enjoyed the ${aspect}; A ${first === "negative" ? "did not" : "felt indifferent"}.`);
+    else if (first === "positive") lines.push(locale === "ja" ? `Aは${aspect}を楽しみました。` : `A enjoyed the ${aspect}.`);
+    else if (second === "positive") lines.push(locale === "ja" ? `Bは${aspect}を楽しみました。` : `B enjoyed the ${aspect}.`);
+    else if (first === "negative" && second === "negative") lines.push(locale === "ja" ? `ふたりとも${aspect}は合いませんでした。` : `Neither of you enjoyed the ${aspect}.`);
     else {
-      if (first === "negative") lines.push(`A did not enjoy the ${tag}.`);
-      if (second === "negative") lines.push(`B did not enjoy the ${tag}.`);
+      if (first === "negative") lines.push(locale === "ja" ? `Aには${aspect}が合いませんでした。` : `A did not enjoy the ${aspect}.`);
+      if (second === "negative") lines.push(locale === "ja" ? `Bには${aspect}が合いませんでした。` : `B did not enjoy the ${aspect}.`);
     }
   }
   for (const dimension of dimensions) {
@@ -160,15 +170,17 @@ export function whatWeLearned(reviews: ExperienceReview[]): string[] {
     const secondSignal = personB.practical.find(signal => signal.dimension === dimension);
     const first = firstSignal?.value;
     const second = secondSignal?.value;
-    const preference = (value: PreferenceSignal["value"]) => labels[dimension][value < 0 ? 0 : 1].toLowerCase();
-    const phrase = (signal: NonNullable<typeof firstSignal>) => signal.futurePreference ? `preferred ${preference(signal.value)} experiences next time` : signal.signalClass === "stable_preference" ? `explicitly described a usual preference for ${preference(signal.value)} experiences` : `reacted toward ${preference(signal.value)} in this experience; persistence is still being learned`;
+    const preference = (value: PreferenceSignal["value"]) => locale === "ja" ? translate(locale, `practical.${dimension}.${value < 0 ? "low" : "high"}`) : labels[dimension][value < 0 ? 0 : 1].toLowerCase();
+    const phrase = (signal: NonNullable<typeof firstSignal>) => locale === "ja"
+      ? signal.futurePreference ? `次回は「${preference(signal.value)}」を希望しました` : signal.signalClass === "stable_preference" ? `普段から「${preference(signal.value)}」を好むと明確に話しました` : `今回「${preference(signal.value)}」の方向に反応しました。続く好みかは学習中です`
+      : signal.futurePreference ? `preferred ${preference(signal.value)} experiences next time` : signal.signalClass === "stable_preference" ? `explicitly described a usual preference for ${preference(signal.value)} experiences` : `reacted toward ${preference(signal.value)} in this experience; persistence is still being learned`;
     if (firstSignal && secondSignal && first === second && firstSignal.signalClass === secondSignal.signalClass && firstSignal.futurePreference === secondSignal.futurePreference) lines.push(`You both ${phrase(firstSignal)}.`);
     else {
       if (firstSignal) lines.push(`A ${phrase(firstSignal)}.`);
       if (secondSignal) lines.push(`B ${phrase(secondSignal)}.`);
     }
   }
-  if (!lines.length) lines.push(`A: ${overallLabels[personA.overall]}. B: ${overallLabels[personB.overall]}. No specific taste or practical preference was added.`);
+  if (!lines.length) lines.push(locale === "ja" ? `A: ${overallLabel(personA.overall, locale)}。B: ${overallLabel(personB.overall, locale)}。具体的な好みや実用条件は追加されませんでした。` : `A: ${overallLabels[personA.overall]}. B: ${overallLabels[personB.overall]}. No specific taste or practical preference was added.`);
   return lines;
 }
 
@@ -178,15 +190,15 @@ export function experienceContext(chapters: MemoryChapter[]) {
     .sort((first, second) => second.reviewedAt.localeCompare(first.reviewedAt)).slice(0, 12);
 }
 
-export function experienceExplanation(chapters: MemoryChapter[]) {
+export function experienceExplanation(chapters: MemoryChapter[], locale: Locale = "en") {
   const reviews = experienceContext(chapters);
   if (!reviews.length) return "";
   const chapterId = reviews[0].chapterId;
   const recent = reviews.filter(review => review.chapterId === chapterId);
-  const summaries = whatWeLearned(recent);
-  const lines = summaries.length ? summaries : recent.map(review => `${review.person}: ${overallLabels[review.overall]}.${review.taste.filter(signal => signal.sentiment === "positive").map(signal => ` Enjoyed the ${signal.tag}.`).join("")}${review.practical.map(signal => {
-    const label = labels[signal.dimension][signal.value < 0 ? 0 : 1].toLowerCase();
-    return signal.futurePreference ? ` Preferred ${label} next time.` : signal.signalClass === "stable_preference" ? ` Explicitly described a usual preference for ${label}.` : ` Reacted toward ${label} in this experience.`;
+  const summaries = whatWeLearned(recent, locale);
+  const lines = summaries.length ? summaries : recent.map(review => `${review.person}: ${overallLabel(review.overall, locale)}.${review.taste.filter(signal => signal.sentiment === "positive").map(signal => locale === "ja" ? ` ${signal.tag}を楽しみました。` : ` Enjoyed the ${signal.tag}.`).join("")}${review.practical.map(signal => {
+    const label = locale === "ja" ? translate(locale, `practical.${signal.dimension}.${signal.value < 0 ? "low" : "high"}`) : labels[signal.dimension][signal.value < 0 ? 0 : 1].toLowerCase();
+    return locale === "ja" ? signal.futurePreference ? ` 次回は「${label}」を希望しました。` : signal.signalClass === "stable_preference" ? ` 普段から「${label}」を好むと話しました。` : ` 今回は「${label}」の方向に反応しました。` : signal.futurePreference ? ` Preferred ${label} next time.` : signal.signalClass === "stable_preference" ? ` Explicitly described a usual preference for ${label}.` : ` Reacted toward ${label} in this experience.`;
   }).join("")}`);
-  return `From your actual experience of ${recent[0].entityName}: ${lines.join(" ")} These are recent observations, not proof of a lasting preference. Candidate practical details still require their own evidence.`;
+  return locale === "ja" ? `${recent[0].entityName}を実際に体験してわかったこと: ${lines.join(" ")} これは最近の観察であり、長く続く好みの証明ではありません。候補の実用情報には、その候補自身の根拠が必要です。` : `From your actual experience of ${recent[0].entityName}: ${lines.join(" ")} These are recent observations, not proof of a lasting preference. Candidate practical details still require their own evidence.`;
 }

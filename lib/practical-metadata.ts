@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { translate, type Locale } from "./i18n";
 
 const evidenceSchema = z.object({
   value: z.string(), evidence_source: z.string().url(), evidence_type: z.enum(["verified", "heuristic", "unknown"]),
@@ -41,11 +42,11 @@ export function normalizeMetadata(candidate: MetadataCandidate, source: string, 
   return metadata;
 }
 
-export function practicalChips(metadata: PracticalMetadata | undefined, now = Date.now()) {
+export function practicalChips(metadata: PracticalMetadata | undefined, now = Date.now(), locale: Locale = "en") {
   if (!metadata) return [];
   const chips: Array<{ label: string; source: string; detail: string }> = [];
-  if (supportedEvidence(metadata.price, now) && metadata.price.evidence_type === "verified") chips.push({ label: metadata.price.value === "mid-range" ? "Mid-range" : metadata.price.value === "budget" ? "Budget" : "Premium", source: metadata.price.evidence_source, detail: `${metadata.price.raw_evidence} · checked ${metadata.price.fetched_at}` });
-  if (supportedEvidence(metadata.crowd, now)) chips.push({ label: metadata.crowd.evidence_type === "verified" ? `Crowd evidence: ${metadata.crowd.value}` : `Crowd hint: ${metadata.crowd.value} (description)`, source: metadata.crowd.evidence_source, detail: `${metadata.crowd.evidence_type} · ${metadata.crowd.raw_evidence} · not live occupancy · checked ${metadata.crowd.fetched_at}` });
+  if (supportedEvidence(metadata.price, now) && metadata.price.evidence_type === "verified") chips.push({ label: translate(locale, metadata.price.value === "mid-range" ? "metadata.midRange" : metadata.price.value === "budget" ? "metadata.budget" : "metadata.premium"), source: metadata.price.evidence_source, detail: `${metadata.price.raw_evidence} · ${locale === "ja" ? "確認" : "checked"} ${metadata.price.fetched_at}` });
+  if (supportedEvidence(metadata.crowd, now)) chips.push({ label: translate(locale, metadata.crowd.evidence_type === "verified" ? "metadata.crowdEvidence" : "metadata.crowdHint", { value: metadata.crowd.value }), source: metadata.crowd.evidence_source, detail: `${metadata.crowd.evidence_type} · ${metadata.crowd.raw_evidence} · ${locale === "ja" ? "リアルタイム混雑情報ではありません · 確認" : "not live occupancy · checked"} ${metadata.crowd.fetched_at}` });
   return chips;
 }
 

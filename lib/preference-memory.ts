@@ -1,6 +1,7 @@
 import type { MemoryChapter } from "./relationship-memory";
 import { canExperience, type ExperienceReview, type SignalClass } from "./post-experience";
 import { dimensions, labels, type PreferenceState } from "./practical-preferences";
+import { tasteSignalLabel, translate, type Locale } from "./i18n";
 
 export const memoryPolicy = { version: 1, stableWeight: 4, uncertainWeight: 2, contextualWeight: 1, confidencePriorWeight: 2, minimumNetWeight: 4, minimumConfidence: 0.5, minimumChapters: 2, recentChapters: 3, contextDays: 30, recentDecay: [1, 0.5, 0.25], recentScale: 0.75 } as const;
 export type MemoryObservation = {
@@ -55,9 +56,9 @@ export function derivePreferenceMemory(chapters: MemoryChapter[], now = new Date
   return { policyVersion: memoryPolicy.version, longTerm: [...longTerm, ...shared], stillLearning: accumulated.filter(item => !item.stable), recentContext };
 }
 
-export function memorySignalLabel(item: Pick<EnduringPreference, "kind" | "signal" | "direction">) {
-  if (item.kind === "practical") return labels[item.signal as typeof dimensions[number]][item.direction < 0 ? 0 : 1].toLowerCase();
-  return `${item.direction < 0 ? "less" : "enjoying"} ${item.signal}`;
+export function memorySignalLabel(item: Pick<EnduringPreference, "kind" | "signal" | "direction">, locale: Locale = "en") {
+  if (item.kind === "practical") return locale === "ja" ? translate(locale, `practical.${item.signal}.${item.direction < 0 ? "low" : "high"}`) : labels[item.signal as typeof dimensions[number]][item.direction < 0 ? 0 : 1].toLowerCase();
+  return locale === "ja" ? `${tasteSignalLabel(locale, item.signal)}${item.direction < 0 ? "をあまり求めない" : "を楽しむ"}` : `${item.direction < 0 ? "less" : "enjoying"} ${item.signal}`;
 }
 
 export function layeredPracticalProfile(memory: PreferenceMemory, prior: PreferenceState[] = []): PreferenceState[] {
@@ -72,11 +73,15 @@ export function layeredPracticalProfile(memory: PreferenceMemory, prior: Prefere
   });
 }
 
-export function layeredMemoryExplanation(chapters: MemoryChapter[], now?: string) {
+export function layeredMemoryExplanation(chapters: MemoryChapter[], now?: string, locale: Locale = "en") {
   const memory = derivePreferenceMemory(chapters, now);
   const pair = memory.longTerm.filter(item => item.person === "pair");
   const stable = memory.longTerm.filter(item => item.person === "pair" || !pair.some(shared => shared.kind === item.kind && shared.signal === item.signal));
-  const enduring = stable.slice(0, 4).map(item => `${item.person === "pair" ? "You both" : item.person} ${item.promotionSource === "explicit_stable" && item.chapterCount === 1 ? "explicitly described" : `${item.person === "pair" ? "have" : "has"} recurring evidence for`} ${memorySignalLabel(item)}.`);
-  const recent = memory.recentContext.slice(0, 6).map(item => `${item.person}: ${item.evidence} (recent context${item.futurePreference ? "; next-time request" : ""}).`);
-  return [...enduring, ...(recent.length ? [`What mattered recently: ${recent.join(" ")} These temporary observations do not establish a lasting preference.`] : []), ...(enduring.length || recent.length ? ["Together uses enduring preferences as a baseline and recent context as a temporary modifier. Candidate conditions still require their own evidence."] : [])].join(" ");
+  const enduring = stable.slice(0, 4).map(item => locale === "ja"
+    ? `${item.person === "pair" ? "ふたり" : item.person}には、${memorySignalLabel(item, locale)}${item.promotionSource === "explicit_stable" && item.chapterCount === 1 ? "という明確な言葉" : "という繰り返しの根拠"}があります。`
+    : `${item.person === "pair" ? "You both" : item.person} ${item.promotionSource === "explicit_stable" && item.chapterCount === 1 ? "explicitly described" : `${item.person === "pair" ? "have" : "has"} recurring evidence for`} ${memorySignalLabel(item, locale)}.`);
+  const recent = memory.recentContext.slice(0, 6).map(item => locale === "ja" ? `${item.person}: ${item.evidence}（最近の状況${item.futurePreference ? "・次回への希望" : ""}）。` : `${item.person}: ${item.evidence} (recent context${item.futurePreference ? "; next-time request" : ""}).`);
+  return locale === "ja"
+    ? [...enduring, ...(recent.length ? [`最近大事だったこと: ${recent.join(" ")} これらの一時的な観察だけで、長く続く好みとは判断しません。`] : []), ...(enduring.length || recent.length ? ["Togetherは長く続く好みを土台にし、最近の状況を一時的な補正として使います。候補の条件には、その候補自身の根拠が必要です。"] : [])].join(" ")
+    : [...enduring, ...(recent.length ? [`What mattered recently: ${recent.join(" ")} These temporary observations do not establish a lasting preference.`] : []), ...(enduring.length || recent.length ? ["Together uses enduring preferences as a baseline and recent context as a temporary modifier. Candidate conditions still require their own evidence."] : [])].join(" ");
 }

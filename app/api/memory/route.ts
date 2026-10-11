@@ -5,6 +5,7 @@ import { clearMemory, markExperienced, pairCookie, readMemory, reviewHash, saveE
 import { deriveProfile } from "../../../lib/relationship-memory";
 import { interpretPreferenceNote, signalSchema, type PreferenceSignal, type PreferenceEvidence } from "../../../lib/practical-preferences";
 import { canExperience, interpretExperience, reviewFingerprint, reviewInputSchema } from "../../../lib/post-experience";
+import { normalizeLocale, translate } from "../../../lib/i18n";
 
 export const runtime = "edge";
 
@@ -31,36 +32,38 @@ function sameOrigin(request: NextRequest) {
 }
 
 const experienceSchema = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("experienced"), chapterId: z.string().uuid() }).strict(),
-  z.object({ action: z.literal("review"), chapterId: z.string().uuid(), review: reviewInputSchema }).strict(),
+  z.object({ action: z.literal("experienced"), chapterId: z.string().uuid(), locale: z.enum(["en", "ja"]).optional() }).strict(),
+  z.object({ action: z.literal("review"), chapterId: z.string().uuid(), review: reviewInputSchema, locale: z.enum(["en", "ja"]).optional() }).strict(),
 ]);
 
 export async function POST(request: NextRequest) {
-  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
-  const parsed = experienceSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid experience reaction" }, { status: 400 });
+  const body = await request.json().catch(() => null);
+  const locale = normalizeLocale(body && typeof body === "object" ? (body as { locale?: unknown }).locale : undefined);
+  if (!sameOrigin(request)) return NextResponse.json({ error: translate(locale, "memory.error.invalidOrigin") }, { status: 403 });
+  const parsed = experienceSchema.safeParse(body);
+  if (!parsed.success) return NextResponse.json({ error: translate(locale, "memory.error.invalidReaction") }, { status: 400 });
   const id = pairId(request);
   try {
     if (!env.DB) throw new Error("Storage unavailable");
     const { chapterId, action } = parsed.data;
     const snapshot = await readMemory(env.DB, id);
     const chapter = snapshot.chapters.find(item => item.id === chapterId);
-    if (!chapter || !canExperience(chapter)) return respond({ error: "A saved LIVE grounded chapter is required." }, id, 404);
+    if (!chapter || !canExperience(chapter)) return respond({ error: translate(locale, "memory.error.liveRequired") }, id, 404);
     if (action === "experienced") {
-      if (!await markExperienced(env.DB, id, chapterId)) return respond({ error: "Chapter not found" }, id, 404);
+      if (!await markExperienced(env.DB, id, chapterId)) return respond({ error: translate(locale, "memory.error.notFound") }, id, 404);
     } else {
-      if (!chapter.experiencedAt) return respond({ error: "Mark We tried this before leaving a reaction." }, id, 409);
+      if (!chapter.experiencedAt) return respond({ error: translate(locale, "memory.error.markTried") }, id, 409);
       const input = parsed.data.review;
       const hash = await reviewFingerprint(input);
       if ((await reviewHash(env.DB, id, chapterId, input.person))?.hash === hash) return respond(await readMemory(env.DB, id), id);
       const key = process.env.OPENAI_API_KEY;
-      if ((input.note || input.chips.length) && !key) return respond({ error: "Note interpretation is unavailable. You can still save your overall reaction." }, id, 503);
+      if ((input.note || input.chips.length) && !key) return respond({ error: translate(locale, "memory.error.noteUnavailable") }, id, 503);
       const interpreted = input.note || input.chips.length ? await interpretExperience(input, key!, process.env.OPENAI_MODEL ?? "gpt-4o-mini") : { taste: [], practical: [] };
-      if (!await saveExperienceReview(env.DB, id, chapterId, input, interpreted, hash)) return respond({ error: "Chapter not found" }, id, 404);
+      if (!await saveExperienceReview(env.DB, id, chapterId, input, interpreted, hash)) return respond({ error: translate(locale, "memory.error.notFound") }, id, 404);
     }
     return respond(await readMemory(env.DB, id), id);
   } catch {
-    return respond({ error: "Could not save the experience reaction. Please try again; your previous evidence is unchanged." }, id, 503);
+    return respond({ error: translate(locale, "memory.error.reactionSave") }, id, 503);
   }
 }
 
@@ -74,39 +77,42 @@ export async function GET(request: NextRequest) {
   }
 }
 
-const feedbackSchema = z.object({ chapterId: z.string().uuid(), feedback: z.enum(["liked", "good_surprise", "neutral", "not_for_us"]), reflection: z.string().max(2000).optional(), preference: signalSchema.optional(), status: z.enum(["suggested", "tried", "skipped"]).optional() }).strict();
+const feedbackSchema = z.object({ chapterId: z.string().uuid(), feedback: z.enum(["liked", "good_surprise", "neutral", "not_for_us"]), reflection: z.string().max(2000).optional(), preference: signalSchema.optional(), status: z.enum(["suggested", "tried", "skipped"]).optional(), locale: z.enum(["en", "ja"]).optional() }).strict();
 
 export async function PATCH(request: NextRequest) {
-  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
-  const parsed = feedbackSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid feedback" }, { status: 400 });
+  const body = await request.json().catch(() => null);
+  const locale = normalizeLocale(body && typeof body === "object" ? (body as { locale?: unknown }).locale : undefined);
+  if (!sameOrigin(request)) return NextResponse.json({ error: translate(locale, "memory.error.invalidOrigin") }, { status: 403 });
+  const parsed = feedbackSchema.safeParse(body);
+  if (!parsed.success) return NextResponse.json({ error: translate(locale, "memory.error.invalidFeedback") }, { status: 400 });
   const id = pairId(request);
   try {
     if (!env.DB) throw new Error("Storage unavailable");
     const { chapterId, feedback, reflection, preference, status } = parsed.data;
     const snapshot = await readMemory(env.DB, id);
-    if (!snapshot.chapters.some(chapter => chapter.id === chapterId && chapter.state === "LIVE")) return respond({ error: "Chapter not found" }, id, 404);
+    if (!snapshot.chapters.some(chapter => chapter.id === chapterId && chapter.state === "LIVE")) return respond({ error: translate(locale, "memory.error.notFound") }, id, 404);
     const signals: Array<PreferenceSignal & { source: PreferenceEvidence["source"] }> = preference ? [{ ...preference, source: "explicit_chip" }] : [];
     if (reflection?.trim()) {
       const key = process.env.OPENAI_API_KEY;
-      if (!key) return respond({ error: "Note interpretation is unavailable. Use the preference chips instead." }, id, 503);
+      if (!key) return respond({ error: translate(locale, "memory.error.preferenceUnavailable") }, id, 503);
       signals.push(...(await interpretPreferenceNote(reflection, key, process.env.OPENAI_MODEL ?? "gpt-4o-mini")).filter(signal => signal.dimension !== preference?.dimension).map(signal => ({ ...signal, source: "free_text" as const })));
     }
-    if (!await updateFeedback(env.DB, id, chapterId, feedback, reflection, signals, status ?? (feedback === "not_for_us" ? "skipped" : undefined))) return respond({ error: "Chapter not found" }, id, 404);
+    if (!await updateFeedback(env.DB, id, chapterId, feedback, reflection, signals, status ?? (feedback === "not_for_us" ? "skipped" : undefined))) return respond({ error: translate(locale, "memory.error.notFound") }, id, 404);
     return respond(await readMemory(env.DB, id), id);
   } catch {
-    return respond({ error: "Could not save feedback. Please try again." }, id, 503);
+    return respond({ error: translate(locale, "memory.error.feedbackSave") }, id, 503);
   }
 }
 
 export async function DELETE(request: NextRequest) {
-  if (!sameOrigin(request)) return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
+  const locale = normalizeLocale(new URL(request.url).searchParams.get("locale"));
+  if (!sameOrigin(request)) return NextResponse.json({ error: translate(locale, "memory.error.invalidOrigin") }, { status: 403 });
   const id = pairId(request);
   try {
     if (!env.DB) throw new Error("Storage unavailable");
     await clearMemory(env.DB, id);
     return respond({ chapters: [], profile: deriveProfile([]), persistence: "D1" }, crypto.randomUUID());
   } catch {
-    return respond({ error: "Could not reset your Journey. Please try again." }, id, 503);
+    return respond({ error: translate(locale, "memory.error.reset") }, id, 503);
   }
 }

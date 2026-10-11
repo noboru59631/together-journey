@@ -2,6 +2,7 @@ import type { MemoryChapter, TasteProfile } from "./relationship-memory";
 import { rerankCandidates, type PracticalCandidate, type PreferenceState } from "./practical-preferences";
 import { canExperience, experienceExplanation, experienceWeight } from "./post-experience";
 import { derivePreferenceMemory, layeredMemoryExplanation } from "./preference-memory";
+import { domainLabel, tasteSignalLabel, type Locale } from "./i18n";
 
 export const discoveryDomains = [
   { id: "movie", label: "Movies", type: "urn:entity:movie", cues: ["film", "cinema", "movie", "story", "atmosphere", "immersive"] },
@@ -149,11 +150,12 @@ export function rankDiscoveries<Candidate extends PracticalCandidate & { entity:
   return { ranked, excluded: candidates.length - fresh.length };
 }
 
-export function discoveryWhy(direction: ReturnType<typeof domainDirections>[number], chapters: MemoryChapter[], candidate: string): DiscoveryWhy {
-  const evidence = direction.evidence.slice(0, 2).join(" and ");
+export function discoveryWhy(direction: ReturnType<typeof domainDirections>[number], chapters: MemoryChapter[], candidate: string, locale: Locale = "en"): DiscoveryWhy {
+  const evidence = direction.evidence.slice(0, 2).map(signal => tasteSignalLabel(locale, signal)).join(locale === "ja" ? "と" : " and ");
+  const label = domainLabel(locale, direction.category, direction.label);
   return {
-    known: [layeredMemoryExplanation(chapters), experienceExplanation(chapters)].filter(Boolean).join(" ") || `Your earlier reflections include ${evidence}. These signals come from ${direction.sourceChapterIds.length} grounded chapter${direction.sourceChapterIds.length === 1 ? "" : "s"}.`,
-    new: direction.explored ? `A fresh ${direction.label.toLowerCase()} chapter; previous IDs and near-duplicate names were excluded.` : `You have not received a ${direction.label.toLowerCase()} discovery yet. This is a direction to try, not a confirmed preference.`,
-    fits: `Qloo returned ${candidate} for your verified cultural interests from both people. Together balanced variety with your available practical evidence.`,
+    known: [layeredMemoryExplanation(chapters, undefined, locale), experienceExplanation(chapters, locale)].filter(Boolean).join(" ") || (locale === "ja" ? `以前の感想には${evidence}という手がかりがあります。根拠は${direction.sourceChapterIds.length}件の確認済みチャプターです。` : `Your earlier reflections include ${evidence}. These signals come from ${direction.sourceChapterIds.length} grounded chapter${direction.sourceChapterIds.length === 1 ? "" : "s"}.`),
+    new: locale === "ja" ? direction.explored ? `以前のIDと似た名前を除外した、新しい${label}のチャプターです。` : `${label}の発見はまだありません。確定した好みではなく、試してみる方向です。` : direction.explored ? `A fresh ${direction.label.toLowerCase()} chapter; previous IDs and near-duplicate names were excluded.` : `You have not received a ${direction.label.toLowerCase()} discovery yet. This is a direction to try, not a confirmed preference.`,
+    fits: locale === "ja" ? `Qlooが、ふたりそれぞれの確認済みの興味から${candidate}を返しました。Togetherは新しさと、利用できる実用的な根拠の両方を反映しました。` : `Qloo returned ${candidate} for your verified cultural interests from both people. Together balanced variety with your available practical evidence.`,
   };
 }

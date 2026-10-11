@@ -1,6 +1,7 @@
 import { domainDirections, explorationHistory, type DiscoveryRecord, type DomainHistory } from "./discovery";
 import { canExperience, experienceContext, experienceExplanation, experienceWeight, type ExperienceReview } from "./post-experience";
 import { derivePreferenceMemory, layeredMemoryExplanation, type PreferenceMemory } from "./preference-memory";
+import { domainLabel, tasteSignalLabel, type Locale } from "./i18n";
 
 export type Person = "you" | "partner";
 export type Feedback = "liked" | "good_surprise" | "neutral" | "not_for_us";
@@ -140,16 +141,19 @@ export function memoryContext(chapters: MemoryChapter[]) {
   };
 }
 
-export function memoryExplanation(chapters: MemoryChapter[], category: string) {
-  if (!chapters.length) return "This is your first chapter. Together will remember your two reflections after this grounded reveal.";
+export function memoryExplanation(chapters: MemoryChapter[], category: string, locale: Locale = "en") {
+  if (!chapters.length) return locale === "ja" ? "これは最初のチャプターです。根拠のある結果を表示したあと、Togetherがふたりの感想を記憶します。" : "This is your first chapter. Together will remember your two reflections after this grounded reveal.";
   const profile = discoveryTasteProfile(chapters);
-  const shared = profile.shared.slice(0, 2).map(signal => signal.tag).join(" and ");
-  const you = profile.different.you.slice(0, 2).map(signal => signal.tag).join(" and ");
-  const partner = profile.different.partner.slice(0, 2).map(signal => signal.tag).join(" and ");
-  const overlap = shared ? `you both responded to ${shared}` : "your earlier reflections opened different doors";
-  const difference = you && partner ? `, while A responded to ${you} and B to ${partner}` : "";
+  const separator = locale === "ja" ? "と" : " and ";
+  const shared = profile.shared.slice(0, 2).map(signal => tasteSignalLabel(locale, signal.tag)).join(separator);
+  const you = profile.different.you.slice(0, 2).map(signal => tasteSignalLabel(locale, signal.tag)).join(separator);
+  const partner = profile.different.partner.slice(0, 2).map(signal => tasteSignalLabel(locale, signal.tag)).join(separator);
+  const overlap = locale === "ja" ? shared ? `ふたりとも${shared}に反応したこと` : "以前の感想から、それぞれ違う入口が見えたこと" : shared ? `you both responded to ${shared}` : "your earlier reflections opened different doors";
+  const difference = locale === "ja" ? you && partner ? `、さらにAは${you}、Bは${partner}に反応したこと` : "" : you && partner ? `, while A responded to ${you} and B to ${partner}` : "";
   const newDomain = profile.unexplored.some(opportunity => opportunity.category === category);
-  return `${layeredMemoryExplanation(chapters)} ${experienceExplanation(chapters)}${experienceContext(chapters).length ? " " : ""}Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and looked for discovery in your still-unexplored ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
+  return locale === "ja"
+    ? `${layeredMemoryExplanation(chapters, undefined, locale)} ${experienceExplanation(chapters, locale)}${experienceContext(chapters).length ? " " : ""}${overlap}${difference}をもとに、現在の手がかりと以前Qlooで確認した興味をつなげました${newDomain ? `。まだ試していない${domainLabel(locale, category, category)}の方向も探しました` : ""}。以前のおすすめは候補から除外しています。${chapters.some(chapter => chapter.feedback === "not_for_us") ? "「今回は違う」とした候補は、前向きな手がかりとして再利用していません。" : ""}`
+    : `${layeredMemoryExplanation(chapters, undefined, locale)} ${experienceExplanation(chapters, locale)}${experienceContext(chapters).length ? " " : ""}Because ${overlap}${difference}, Together connected your current signals with earlier Qloo-verified interests${newDomain ? ` and looked for discovery in your still-unexplored ${category} domain` : ""}. Earlier recommendations were excluded.${chapters.some(chapter => chapter.feedback === "not_for_us") ? " Recommendations marked Not for us were not reused as positive signals." : ""}`;
 }
 
 export function historicalEntities(chapters: MemoryChapter[]) {

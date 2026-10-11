@@ -70,6 +70,13 @@ The browser generates one request UUID per deliberate discovery action. Retrying
 
 The first screen leads directly into this flow. It is not a dashboard, ranking, matching service, or recommendation list.
 
+### Localization
+
+- The header offers compact `EN / 日本語` switching, with the choice persisted in browser storage and restored on reload.
+- English is the default unless a saved preference or the browser locale clearly indicates Japanese.
+- Locale changes presentation copy and requested OpenAI-generated explanations only. Qloo IDs, entity names, categories, deterministic scoring, and grounding stay unchanged.
+- The anonymous D1 pair profile, Journey history, raw notes, and relationship memory are shared across languages; switching language never creates or forks memory.
+
 ## Architecture
 
 ## Relationship Memory — Together learns how two people experience the world together.

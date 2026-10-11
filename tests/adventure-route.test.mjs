@@ -317,6 +317,19 @@ test("first grounded reveal records both reflections and separate entity reactio
   assert.equal(JSON.parse(context).relationshipMemory.chapterCount, 0);
 });
 
+test("Japanese locale reaches the mocked generator and localizes rationale without changing Qloo grounding", async () => {
+  const japaneseExtraction = { ...extraction, sharedSpark: { title: "静かな驚き", summary: "ふたりとも、混雑を避けながら没入できる美しさを好んでいます。" } };
+  const { result, calls, stored } = await exercise({ requestBody: { ...body, locale: "ja" }, extractionResult: japaneseExtraction });
+  const openAiRequest = JSON.parse(calls.find(call => call.url.hostname === "api.openai.com").options.body);
+  assert.match(openAiRequest.input[0].content, /natural Japanese/);
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.title, "Kiyosumi Gardens");
+  assert.match(result.description, /Kiyosumi Gardensを/);
+  assert.match(result.memory.explanation, /最初のチャプター/);
+  assert.equal(stored[0].recommendation.id, place.entity_id);
+  assert.equal(stored[0].entities[0].id, "movie-mononoke");
+});
+
 test("two-run demonstration extends profile, supplies prior context and excludes prior reveal", async () => {
   const first = await exercise();
   const second = await exercise({ requestBody: secondBody, extractionResult: secondExtraction, memoryHistory: first.stored, placeCandidates: [place, nextPlace] });

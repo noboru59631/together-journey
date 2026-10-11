@@ -186,7 +186,7 @@ test("memory endpoints set private cookie, validate feedback, reject cross-origi
   const responseFactory = (value, init = {}) => ({ ...init, status: init.status ?? 200, value, cookie: null, cookies: { set(name, value, options) { this.cookie = { name, value, options }; } } });
   const route = loadTypescript(fileURLToPath(new URL("../app/api/memory/route.ts", import.meta.url)), { process: { env: { NODE_ENV: "production" } }, require: name => name === "cloudflare:workers" ? { env: { DB: db } } : name === "next/server" ? { NextResponse: { json: responseFactory } } : name === "zod" ? loadZod() : null });
   function loadZod() { return { z }; }
-  const request = (body, origin = "https://together.test") => ({ url: "https://together.test/api/memory", headers: { ...headers, get: () => origin }, cookies: { get: () => ({ value: pairId }) }, json: async () => body });
+  const request = (body, origin = "https://together.test", locale = "en") => ({ url: `https://together.test/api/memory?locale=${locale}`, headers: { ...headers, get: () => origin }, cookies: { get: () => ({ value: pairId }) }, json: async () => body });
   try {
     const first = await route.GET(request());
     assert.equal(first.value.profile.chapters, 0);
@@ -195,7 +195,11 @@ test("memory endpoints set private cookie, validate feedback, reject cross-origi
     assert.equal(first.headers["Cache-Control"], "no-store");
     await store.saveMemory(db, chapter());
     assert.equal((await route.PATCH(request({ chapterId, feedback: "not_for_us" }))).value.chapters[0].feedback, "not_for_us");
-    assert.equal((await route.GET(request())).value.chapters[0].pairId, undefined);
+    const englishMemory = (await route.GET(request(undefined, "https://together.test", "en"))).value;
+    const japaneseMemory = (await route.GET(request(undefined, "https://together.test", "ja"))).value;
+    assert.equal(englishMemory.chapters[0].pairId, undefined);
+    assert.equal(japaneseMemory.chapters[0].id, englishMemory.chapters[0].id);
+    assert.deepEqual(japaneseMemory.profile, englishMemory.profile);
     assert.equal((await route.PATCH(request({ chapterId, feedback: "invented" }))).status, 400);
     assert.equal((await route.DELETE(request(null, "https://attacker.test"))).status, 403);
     const reset = await route.DELETE(request());

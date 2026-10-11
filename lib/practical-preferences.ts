@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { supportedEvidence, type PracticalMetadata } from "./practical-metadata";
+import { translate, type Locale } from "./i18n";
 
 export const dimensions = ["quiet", "crowds", "setting", "budget", "planning", "pace"] as const;
 export type Dimension = typeof dimensions[number];
@@ -24,7 +25,9 @@ export function learnedPreferences(profile: PreferenceState[]) {
   return profile.filter(state => state.layer === "stable_context" ? state.weight > 0 && Math.abs(state.score) > 0.000001 : state.weight >= 1 && Math.abs(state.score) >= 0.5);
 }
 
-export const preferenceLabel = (state: PreferenceState) => labels[state.dimension][state.score < 0 ? 0 : 1];
+export function preferenceLabel(state: PreferenceState, locale: Locale = "en") {
+  return translate(locale, `practical.${state.dimension}.${state.score < 0 ? "low" : "high"}`);
+}
 
 const noteChoices = ["quieter", "livelier", "less_crowded", "busier", "indoors", "outdoors", "budget_conscious", "premium", "spontaneous", "planned", "relaxed", "active"] as const;
 const noteDirections: Record<typeof noteChoices[number], PreferenceSignal> = {
@@ -81,7 +84,7 @@ export function candidateFacts(candidate: PracticalCandidate): CandidateFact[] {
   })];
 }
 
-export function rerankCandidates<Candidate extends PracticalCandidate>(candidates: Candidate[], profile: PreferenceState[]) {
+export function rerankCandidates<Candidate extends PracticalCandidate>(candidates: Candidate[], profile: PreferenceState[], locale: Locale = "en") {
   const learned = learnedPreferences(profile);
   const scored = candidates.map((candidate, index) => {
     const facts = candidateFacts(candidate);
@@ -96,6 +99,11 @@ export function rerankCandidates<Candidate extends PracticalCandidate>(candidate
   const changed = ranked.some((item, index) => item.index !== index);
   const recommendationChanged = Boolean(ranked[0] && ranked[0].index !== 0);
   const supported = ranked[0]?.contributors.filter(item => item.contribution > 0) ?? [];
-  const rationale = recommendationChanged && supported.length ? `You’ve been leaning toward ${supported.map(item => preferenceLabel(learned.find(state => state.dimension === item.dimension)! ).toLowerCase()).join(" and ")} experiences, so Together ranked this higher using available candidate evidence.${supported.some(item => item.evidence.startsWith("Crowd hint")) ? " Crowd support is a description hint, not verified busy-time data." : ""}` : "";
+  const preferences = supported.map(item => preferenceLabel(learned.find(state => state.dimension === item.dimension)!, locale));
+  const rationale = recommendationChanged && supported.length
+    ? locale === "ja"
+      ? `${preferences.join("・")}という最近の傾向と、候補にある確認可能な情報を照らし合わせ、Togetherがこの候補を上位にしました。${supported.some(item => item.evidence.startsWith("Crowd hint")) ? "混雑については説明文からの参考情報で、リアルタイムの混雑状況ではありません。" : ""}`
+      : `You’ve been leaning toward ${preferences.map(value => value.toLowerCase()).join(" and ")} experiences, so Together ranked this higher using available candidate evidence.${supported.some(item => item.evidence.startsWith("Crowd hint")) ? " Crowd support is a description hint, not verified busy-time data." : ""}`
+    : "";
   return { ranked, changed, recommendationChanged, rationale };
 }
