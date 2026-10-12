@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { webcrypto } from "node:crypto";
+import { loadTypescript } from "./load-typescript.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 const requireRepository = createRequire(path.join(repository, "package.json"));
@@ -77,21 +79,36 @@ async function exercise({
   history = [],
   database = true,
   historyFailure = false,
+  memoryHistory = [],
+  memorySaveFailure = false,
+  preferenceHistory = [],
+  enrichmentFailure = false,
 } = {}) {
   const calls = [];
   const exports = {};
   let llmAttempts = 0;
-  const databaseMock = { prepare: () => ({ bind: () => ({ all: async () => {
+  const stored = [];
+  const databaseMock = { batch: async statements => Promise.all(statements.map(statement => statement.run())), prepare: sql => ({ bind: (...values) => ({
+    run: async () => {
+      if (sql.startsWith("INSERT INTO pair_memories")) {
+        if (memorySaveFailure) throw new Error("save failed");
+        stored.push(JSON.parse(values[3]));
+      }
+      return { meta: { changes: 1 } };
+    },
+    first: async () => ({ revoked_at: null }),
+    all: async () => {
     if (historyFailure) throw new Error("history failed");
-    return { results: history };
+    return { results: sql.includes("practical_evidence") ? preferenceHistory : sql.includes("pair_memories") ? memoryHistory.map(chapter => ({ payload: JSON.stringify(chapter), feedback: chapter.feedback, reflection: chapter.reflection })) : history };
   } }) }) };
   const context = vm.createContext({
-    exports, URL, AbortSignal, Error, JSON, Set, Promise,
+    exports, URL, AbortSignal, Error, JSON, Set, Promise, Date, crypto: webcrypto,
     process: { env: { ...(openAiKey ? { OPENAI_API_KEY: openAiKey } : {}), ...(qlooKey ? { QLOO_API_KEY: qlooKey } : {}), QLOO_API_BASE_URL: "https://qloo.test" } },
     require: moduleName => {
       if (moduleName === "cloudflare:workers") return { env: { DB: database ? databaseMock : undefined } };
-      if (moduleName === "next/server") return { NextResponse: { json: (value, init = {}) => ({ status: init.status ?? 200, json: async () => value }) } };
+      if (moduleName === "next/server") return { NextResponse: { json: (value, init = {}) => ({ status: init.status ?? 200, cookies: { set() {} }, json: async () => value }) } };
       if (moduleName === "zod") return requireRepository("zod");
+      if (moduleName.startsWith("../../../lib/")) return loadTypescript(path.resolve(repository, "app/api/adventure", `${moduleName}.ts`), { fetch: context.fetch });
       throw new Error(`Unexpected test import: ${moduleName}`);
     },
     fetch: async (urlValue, options) => {
@@ -107,7 +124,10 @@ async function exercise({
       if (qlooFailure instanceof Error) throw qlooFailure;
       if (typeof qlooFailure === "number") return { ok: false, status: qlooFailure };
       let entities;
-      if (url.pathname === "/search") {
+      if (url.pathname === "/entities") {
+        if (enrichmentFailure) throw new Error("Enrichment offline");
+        entities = placeCandidates;
+      } else if (url.pathname === "/search") {
         const query = url.searchParams.get("query");
         entities = searchOverride ? searchOverride(query, url.searchParams.get("types")) : [entityFixtures[query]].filter(Boolean);
       } else if (emptyInsights) {
@@ -124,7 +144,7 @@ async function exercise({
   const result = await response.json();
   assert.equal(JSON.stringify(result).includes("openai-test-sentinel"), false);
   assert.equal(JSON.stringify(result).includes("qloo-test-sentinel"), false);
-  return { result, calls, response, llmAttempts };
+  return { result, calls, response, llmAttempts, stored };
 }
 
 test("missing LLM key is DEMO and does not claim free-form understanding", async () => {
@@ -132,6 +152,31 @@ test("missing LLM key is DEMO and does not claim free-form understanding", async
   assert.equal(result.mode, "DEMO");
   assert.equal(result.trace.extractionMode, "DEMO");
   assert.equal(calls.length, 0);
+});
+
+test("price enrichment precedes pair reranking and retains Qloo identity and provenance", async () => {
+  const premium = { ...place, properties: { ...place.properties, price_level: 4 } };
+  const budget = { ...nextPlace, properties: { ...nextPlace.properties, price_level: 1 } };
+  const { result, calls } = await exercise({ placeCandidates: [premium, budget], preferenceHistory: [{ chapterId: "prior", dimension: "budget", value: -1, weight: 1, source: "free_text" }] });
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.id, nextPlace.entity_id);
+  assert.equal(result.practicalMetadata.price.evidence_type, "verified");
+  assert.match(result.practicalMetadata.price.evidence_source, /\/entities\?entity_ids=/);
+  assert.equal(result.trace.practicalEnrichment.providerStatus, "ok");
+  assert.equal(result.trace.practicalRanking.recommendationChanged, true);
+  assert.equal(calls.filter(call => call.url.pathname === "/entities").length, 1);
+  assert.deepEqual(new Set(result.trace.practicalRanking.candidates.map(item => item.id)), new Set([place.entity_id, nextPlace.entity_id, book.entity_id, destination.entity_id]));
+});
+
+test("enrichment outage preserves LIVE, all grounded candidates, unknown price and relationship memory", async () => {
+  const { result, stored } = await exercise({ placeCandidates: [place, nextPlace], enrichmentFailure: true, preferenceHistory: [{ chapterId: "prior", dimension: "budget", value: -1, weight: 1, source: "free_text" }] });
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.id, place.entity_id);
+  assert.equal(result.practicalMetadata.price.value, "unknown");
+  assert.equal(result.trace.practicalEnrichment.providerStatus, "unavailable");
+  assert.ok(result.trace.practicalRanking.candidates.every(item => item.score === 0));
+  assert.equal(result.trace.practicalRanking.changed, false);
+  assert.equal(stored.length, 1);
 });
 
 for (const [name, requestBody, extractionResult] of [
@@ -239,4 +284,101 @@ test("malformed input is rejected before external requests", async () => {
   const { response, calls } = await exercise({ requestBody: { reflections: [] } });
   assert.equal(response.status, 400);
   assert.equal(calls.length, 0);
+});
+
+test("discovery reranks the same Qloo set after crowded-to-quieter evidence with supported rationale", async () => {
+  const candidates = [{ ...place, properties: { description: "A lively crowded place." } }, { ...nextPlace, properties: { description: "A quiet uncrowded place." } }];
+  const before = await exercise({ placeCandidates: candidates });
+  assert.equal(before.result.id, place.entity_id);
+  assert.equal(before.result.trace.practicalRanking.changed, false);
+  const preferenceHistory = [{ dimension: "quiet", value: -1, weight: 1, source: "free_text" }, { dimension: "crowds", value: -1, weight: 1, source: "free_text" }];
+  const after = await exercise({ placeCandidates: candidates, preferenceHistory });
+  assert.equal(after.result.id, nextPlace.entity_id);
+  assert.equal(after.result.trace.practicalRanking.changed, true);
+  assert.match(after.result.memory.explanation, /quieter and less crowded/);
+  assert.equal(after.result.trace.candidateCount, before.result.trace.candidateCount);
+  assert.deepEqual(new Set(after.result.trace.practicalRanking.candidates.map(item => item.id)), new Set(before.result.trace.practicalRanking.candidates.map(item => item.id)));
+  const unknown = await exercise({ preferenceHistory, placeCandidates: [place, nextPlace] });
+  assert.equal(unknown.result.id, place.entity_id);
+  assert.equal(unknown.result.trace.practicalRanking.changed, false);
+  assert.equal(unknown.result.memory.explanation.includes("ranked this higher"), false);
+});
+
+test("first grounded reveal records both reflections and separate entity reactions", async () => {
+  const { result, stored, calls } = await exercise();
+  assert.equal(result.memory.saved, true);
+  assert.equal(result.memory.priorChapters, 0);
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].inputs.you, body.reflections[0].text);
+  assert.equal(stored[0].inputs.partner, body.reflections[1].text);
+  assert.equal(stored[0].entities[0].id, "movie-mononoke");
+  assert.equal(stored[0].reactions.length, 2);
+  const context = JSON.parse(calls[0].options.body).input[1].content;
+  assert.equal(JSON.parse(context).relationshipMemory.chapterCount, 0);
+});
+
+test("Japanese locale reaches the mocked generator and localizes rationale without changing Qloo grounding", async () => {
+  const japaneseExtraction = { ...extraction, sharedSpark: { title: "静かな驚き", summary: "ふたりとも、混雑を避けながら没入できる美しさを好んでいます。" } };
+  const { result, calls, stored } = await exercise({ requestBody: { ...body, locale: "ja" }, extractionResult: japaneseExtraction });
+  const openAiRequest = JSON.parse(calls.find(call => call.url.hostname === "api.openai.com").options.body);
+  assert.match(openAiRequest.input[0].content, /natural Japanese/);
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.title, "Kiyosumi Gardens");
+  assert.match(result.description, /Kiyosumi Gardensを/);
+  assert.match(result.memory.explanation, /最初のチャプター/);
+  assert.equal(stored[0].recommendation.id, place.entity_id);
+  assert.equal(stored[0].entities[0].id, "movie-mononoke");
+});
+
+test("two-run demonstration extends profile, supplies prior context and excludes prior reveal", async () => {
+  const first = await exercise();
+  const second = await exercise({ requestBody: secondBody, extractionResult: secondExtraction, memoryHistory: first.stored, placeCandidates: [place, nextPlace] });
+  assert.equal(second.result.mode, "LIVE");
+  assert.equal(second.result.memory.priorChapters, 1);
+  assert.equal(second.result.id, "place-museum");
+  const context = JSON.parse(JSON.parse(second.calls[0].options.body).input[1].content).relationshipMemory;
+  assert.equal(context.chapterCount, 1);
+  assert.ok(context.different.you.includes("ancient forests"));
+  assert.ok(context.different.partner.includes("orchestral music"));
+  assert.match(second.result.memory.explanation, /ancient forests.*orchestral music/);
+  const insight = second.calls.find(call => call.url.pathname === "/v2/insights");
+  assert.match(insight.url.searchParams.get("signal.interests.entities"), /movie-mononoke/);
+  assert.equal(second.result.memory.profile.chapters, 2);
+  assert.notEqual(JSON.stringify(first.result.memory.profile), JSON.stringify(second.result.memory.profile));
+});
+
+test("NEEDS_INPUT and demo do not write successful memory", async () => {
+  for (const options of [{ openAiKey: "" }, { searchOverride: () => [] }, { emptyInsights: true }]) {
+    const { stored, result } = await exercise(options);
+    assert.equal(stored.length, 0);
+    assert.notEqual(result.mode, "LIVE");
+  }
+});
+
+test("a valid grounded reveal stays honest when its memory write fails", async () => {
+  const { result, stored } = await exercise({ memorySaveFailure: true });
+  assert.equal(result.mode, "LIVE");
+  assert.equal(result.memory.saved, false);
+  assert.equal(result.memory.chapterId, null);
+  assert.equal(result.memory.profile.chapters, 0);
+  assert.equal(stored.length, 0);
+});
+
+test("same entity retains both people's edges without relaxing the distinct-ID gate", async () => {
+  const same = structuredClone(extraction);
+  same.participants[1].entities = structuredClone(same.participants[0].entities);
+  const { result, stored } = await exercise({ extractionResult: same });
+  assert.equal(result.mode, "NEEDS_INPUT");
+  assert.equal(result.trace.resolvedEntities.length, 2);
+  assert.equal(stored.length, 0);
+});
+
+test("Not for us removes old interests from positive Qloo signals and changes category preference", async () => {
+  const first = await exercise();
+  first.stored[0].feedback = "not_for_us";
+  const second = await exercise({ requestBody: secondBody, extractionResult: secondExtraction, memoryHistory: first.stored, placeCandidates: [nextPlace] });
+  const insight = second.calls.find(call => call.url.pathname === "/v2/insights");
+  assert.equal(insight.url.searchParams.get("signal.interests.entities").includes("movie-mononoke"), false);
+  assert.notEqual(second.result.category, "place");
+  assert.match(second.result.memory.explanation, /Not for us/);
 });

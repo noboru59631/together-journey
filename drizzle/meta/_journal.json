@@ -8,6 +8,62 @@
       "when": 1790983803404,
       "tag": "0000_flat_sue_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791692459934,
+      "tag": "0001_dizzy_iron_lad",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791695520540,
+      "tag": "0002_crazy_fenris",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791697935822,
+      "tag": "0003_thankful_odin",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791700000000,
+      "tag": "0004_discovery_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791715700347,
+      "tag": "0005_many_felicia_hardy",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791719858771,
+      "tag": "0006_open_rick_jones",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791759564469,
+      "tag": "0007_busy_ultron",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791770051426,
+      "tag": "0008_premium_guardsmen",
+      "breakpoints": true
     }
   ]
 }
