@@ -15,6 +15,7 @@ export function ExperienceReviewCard({ chapter, busy, onSave }: { chapter: Memor
   const [chips, setChips] = useState<ReviewInput["chips"]>([]);
   if (!canExperience(chapter)) return null;
   const reviews = chapter.experienceReviews ?? [];
+  const solo = chapter.scope === "solo";
   const learned = whatWeLearned(reviews, locale);
   const choices = relevantChips(chapter.discovery?.domain ?? chapter.recommendation.category);
   function edit(person: "A" | "B") {
@@ -27,20 +28,20 @@ export function ExperienceReviewCard({ chapter, busy, onSave }: { chapter: Memor
     }
   }
   return <div className="experience-review">
-    {!chapter.experiencedAt ? <><button className="secondary-action" disabled={busy} onClick={() => onSave({ action: "experienced", chapterId: chapter.id })}>{t("experience.try")}</button><p className="experience-hint">{t("experience.hint")}</p></> : <>
-      <span className="eyebrow">{t("experience.eyebrow")}</span><p>{t("experience.question")}</p>
-      <div className="experience-people">{(chapter.scope === "solo" ? ["A"] as const : ["A", "B"] as const).map(person => {
+    {!chapter.experiencedAt ? <><button className="secondary-action" disabled={busy} onClick={() => onSave({ action: "experienced", chapterId: chapter.id })}>{t(solo ? "solo.experience.try" : "experience.try")}</button><p className="experience-hint">{t(solo ? "solo.experience.hint" : "experience.hint")}</p></> : <>
+      <span className="eyebrow">{t(solo ? "solo.experience.eyebrow" : "experience.eyebrow")}</span><p>{t(solo ? "solo.experience.question" : "experience.question")}</p>
+      <div className="experience-people">{(solo ? ["A"] as const : ["A", "B"] as const).map(person => {
         const review = reviews.find(item => item.person === person);
-        return <button key={person} className="secondary-action" disabled={busy} onClick={() => edit(person)} aria-expanded={editing === person}>{chapter.scope === "solo" ? t("solo.review.you") : t("common.person", { person })}<small>{review ? overallLabel(review.overall, locale) : t("experience.add")}</small></button>;
+        return <button key={person} className="secondary-action" disabled={busy} onClick={() => edit(person)} aria-expanded={editing === person}>{solo ? t("solo.review.you") : t("common.person", { person })}<small>{review ? overallLabel(review.overall, locale) : t("experience.add")}</small></button>;
       })}</div>
-      {editing && <div className="experience-form"><h4>{t("experience.reaction", { person: editing })}</h4><div className="memory-feedback">{overallReactions.map(value => <button key={value} aria-pressed={overall === value} disabled={busy} onClick={() => setOverall(value)}>{overallLabel(value, locale)}</button>)}</div>
+      {editing && <div className="experience-form"><h4>{t(solo ? "solo.experience.reaction" : "experience.reaction", { person: editing })}</h4><div className="memory-feedback">{overallReactions.map(value => <button key={value} aria-pressed={overall === value} disabled={busy} onClick={() => setOverall(value)}>{overallLabel(value, locale)}</button>)}</div>
         <label className="preference-note">{t("experience.note")} <small>{t("common.optional")}</small><input value={note} maxLength={1000} placeholder={t("experience.notePlaceholder")} onChange={event => setNote(event.target.value)}/></label>
         <div className="memory-feedback" aria-label={t("experience.detailsAria")}>{choices.map(chip => <button key={chip} aria-pressed={chips.includes(chip)} disabled={busy} onClick={() => setChips(current => current.includes(chip) ? current.filter(value => value !== chip) : [...current, chip])}>{experienceChipLabel(chip, locale)}</button>)}</div>
         {reviews.some(review => review.person === editing) && <p className="experience-hint">{t("experience.replace")}</p>}
-        <button className="text-action" disabled={busy || !overall} onClick={save}>{t("experience.save", { person: editing })}</button><button className="text-action" disabled={busy} onClick={() => setEditing(null)}>{t("experience.cancel")}</button>
-        <p className="experience-hint">{t("experience.privacy")}</p>
+        <button className="text-action" disabled={busy || !overall} onClick={save}>{t(solo ? "solo.experience.save" : "experience.save", { person: editing })}</button><button className="text-action" disabled={busy} onClick={() => setEditing(null)}>{t("experience.cancel")}</button>
+        <p className="experience-hint">{t(solo ? "solo.experience.privacy" : "experience.privacy")}</p>
       </div>}
-      {learned.length ? <article className="memory-bucket learned-experience"><h3>{t("experience.learned")}</h3>{learned.map(line => <p key={line}>{line}</p>)}</article> : <p className="experience-hint">{reviews.length ? t("experience.waiting", { person: reviews[0].person }) : t("experience.empty")}</p>}
+      {learned.length ? <article className="memory-bucket learned-experience"><h3>{t("experience.learned")}</h3>{learned.map(line => <p key={line}>{line}</p>)}</article> : <p className="experience-hint">{solo ? t(reviews.length ? "solo.experience.saved" : "solo.experience.empty") : reviews.length ? t("experience.waiting", { person: reviews[0].person }) : t("experience.empty")}</p>}
     </>}
   </div>;
 }

@@ -97,8 +97,27 @@ test("solo storage, feedback, archetype and reset stay isolated from pair memory
   assert.equal((await soloStore.readSolo(db, "55555555-5555-4555-8555-555555555555")).chapters.length, 0);
 });
 
+test("solo experienced action saves a LIVE chapter through the route", async () => {
+  const db = database();
+  await soloStore.readSolo(db, soloId);
+  await soloStore.saveSoloChapter(db, soloId, { ...chapter });
+  const route = loadTypescript(fileURLToPath(new URL("../app/api/solo/route.ts", import.meta.url)), {
+    process: { env: {} },
+    require: name => name === "cloudflare:workers" ? { env: { DB: db } } : name === "next/server" ? { NextResponse: { json: (value, init = {}) => ({ value, status: init.status ?? 200, cookies: { set() {} } }) } } : name === "zod" ? { z } : null,
+  });
+  const response = await route.POST({
+    url: "https://together.test/api/solo",
+    headers: { get: () => "https://together.test" },
+    cookies: { get: () => ({ value: soloId }) },
+    json: async () => ({ action: "experienced", chapterId }),
+  });
+  assert.equal(response.status, 200, JSON.stringify(response.value));
+  assert.ok(response.value.chapters[0].experiencedAt);
+  db.sqlite.close();
+});
+
 test("new solo labels are available in English and Japanese", () => {
-  for (const key of ["solo.mode.title", "solo.mode.pair", "solo.mode.solo", "solo.mode.warning", "solo.archetype.label", ...partner.archetypes.map(archetype => `solo.archetype.${archetype}`), "solo.interest.title", "solo.interest.hint", "solo.memory.reset", "solo.rationale.first", "solo.rationale.learned"]) {
+  for (const key of ["solo.mode.title", "solo.mode.pair", "solo.mode.solo", "solo.mode.warning", "solo.archetype.label", ...partner.archetypes.map(archetype => `solo.archetype.${archetype}`), "solo.interest.title", "solo.interest.hint", "solo.memory.reset", "solo.rationale.first", "solo.rationale.learned", "solo.experience.try", "solo.experience.hint", "solo.experience.eyebrow", "solo.experience.question", "solo.experience.reaction", "solo.experience.save", "solo.experience.privacy", "solo.experience.saved", "solo.experience.empty"]) {
     assert.notEqual(i18n.translate("en", key), key);
     assert.notEqual(i18n.translate("ja", key), key);
     assert.notEqual(i18n.translate("en", key), i18n.translate("ja", key));

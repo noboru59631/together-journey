@@ -50,7 +50,7 @@ export function SoloApp({ onSwitch }: { onSwitch: () => void }) {
   async function saveExperience(action: ExperienceAction) {
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/solo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...action, locale }) });
+      const response = await fetch("/api/solo", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(action.action === "review" ? { ...action, locale } : action) });
       if (!response.ok) throw new Error();
       setProfile(await response.json()); return true;
     } catch { setError(t("error.reactionRetry")); return false; } finally { setBusy(false); }
