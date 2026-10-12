@@ -11,6 +11,7 @@ export type MemoryChapter = {
   id: string;
   pairId: string;
   scope?: "solo";
+  soloArchetype?: "comfort" | "explorer" | "opposite" | "surprise";
   timestamp: string;
   inputs: { you: string; partner: string };
   entities: GroundedEntity[];

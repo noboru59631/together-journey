@@ -16,6 +16,11 @@ export const strategyWeights: Record<Archetype, { familiarity: number; novelty: 
 export type SoloSeed = { id: string; name: string; type: string; reaction: string; tags: string[] };
 export type SoloProfile = { id: string; archetype: Archetype; seeds: SoloSeed[]; chapters: MemoryChapter[]; exploration: ReturnType<typeof explorationHistory>; layers: ReturnType<typeof derivePreferenceMemory>; practical: PreferenceState[] };
 
+export function soloChapterArchetype(chapter: MemoryChapter): Archetype {
+  if (chapter.soloArchetype && archetypes.includes(chapter.soloArchetype)) return chapter.soloArchetype;
+  return archetypes.find(archetype => (["en", "ja"] as const).some(locale => chapter.recommendation.rationale.startsWith(translate(locale, `solo.archetype.${archetype}`)))) ?? "explorer";
+}
+
 export function soloDirections(profile: SoloProfile) {
   const history = profile.exploration;
   const tags = new Set([...profile.seeds.flatMap(seed => seed.tags), ...profile.layers.longTerm.filter(item => item.person === "A" && item.kind === "taste" && item.direction > 0).map(item => item.signal)]);

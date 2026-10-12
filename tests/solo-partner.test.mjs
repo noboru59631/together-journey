@@ -55,6 +55,12 @@ test("first run does not claim learned preferences in either language", () => {
   assert.match(partner.soloRationale(profile, "movie", "ja"), /学習したとはまだ/);
 });
 
+test("historical chapters keep the strategy used when discovered", () => {
+  assert.equal(partner.soloChapterArchetype({ ...chapter, soloArchetype: "opposite" }), "opposite");
+  assert.equal(partner.soloChapterArchetype({ ...chapter, recommendation: { ...chapter.recommendation, rationale: "Explorer Partner sets the exploration range." } }), "explorer");
+  assert.equal(partner.soloChapterArchetype({ ...chapter, recommendation: { ...chapter.recommendation, rationale: "あえて違う好みは探索の幅を調整しました。" } }), "opposite");
+});
+
 test("entry mode persists only explicit pair or solo choices", () => {
   assert.equal(entryMode.modeStorageKey, "together.entryMode");
   assert.equal(entryMode.resolveEntryMode("pair"), "pair");
@@ -146,6 +152,7 @@ test("solo LIVE discoveries stay inside Qloo results and reuse experienced memor
     assert.equal(first.status, 200, JSON.stringify(first.value));
     assert.equal(first.value.id, "qloo-1");
     assert.equal(first.value.mode, "LIVE");
+    assert.equal((await soloStore.readSolo(db, soloId)).chapters[0].soloArchetype, "explorer");
     assert.ok(calls.some(url => url.pathname === "/v2/insights" && url.searchParams.get("signal.interests.entities") === "qloo-seed"));
     const firstChapterId = first.value.memory.chapterId;
     await soloStore.markSoloExperienced(db, soloId, firstChapterId);

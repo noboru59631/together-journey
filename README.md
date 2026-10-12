@@ -30,6 +30,8 @@ Four language-agnostic archetype IDs control deterministic ranking. Change them 
 | Opposite Taste (`opposite`) | 1 | 2 | 5 | 2 |
 | Surprise Me (`surprise`) | 1 | 6 | 2 | 4 |
 
+Each new solo chapter records the archetype used. Switching styles changes future ranking without relabeling earlier discoveries or erasing their memory.
+
 Migration `0007_busy_ultron.sql` adds `solo_sessions` (opaque solo cookie ID, archetype, verified seeds) and `solo_memories` (grounded chapters, reactions and practical evidence). Stable/contextual memory and exploration counts are deterministically derived from those persisted chapters. Pair data remains in `pair_sessions` and `pair_memories` with its original cookie and flow. Switching modes changes the locally saved view preference and never copies data. Each mode's reset revokes and deletes only that mode's profile. Neither profile's routes store account secrets. The anonymous cookie expires after 90 days; clearing cookies can make the server-held profile inaccessible.
 
 ### Capability map
