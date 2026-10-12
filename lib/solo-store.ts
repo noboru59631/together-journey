@@ -70,5 +70,6 @@ export async function clearSolo(database: D1Database, id: string) {
   await database.batch([
     database.prepare("INSERT INTO solo_sessions (id, created_at, archetype, seeds, revoked_at) VALUES (?, ?, 'explorer', '[]', ?) ON CONFLICT(id) DO UPDATE SET revoked_at = excluded.revoked_at").bind(id, new Date().toISOString(), new Date().toISOString()),
     database.prepare("DELETE FROM solo_memories WHERE solo_id = ?").bind(id),
+    database.prepare("UPDATE recovery_codes SET revoked_at = ? WHERE profile_type = 'solo' AND target_id = ? AND revoked_at IS NULL").bind(new Date().toISOString(), id),
   ]);
 }

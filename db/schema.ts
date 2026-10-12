@@ -39,6 +39,14 @@ export const soloMemories = sqliteTable("solo_memories", {
   id: text("id").primaryKey(), soloId: text("solo_id").notNull(),
   createdAt: text("created_at").notNull(), payload: text("payload").notNull(),
 }, table => [index("idx_solo_memories_time").on(table.soloId, table.createdAt)]);
+export const recoveryCodes = sqliteTable("recovery_codes", {
+  id: text("id").primaryKey(), profileType: text("profile_type").notNull(), targetId: text("target_id").notNull(),
+  codeHash: text("code_hash").notNull(), createdAt: text("created_at").notNull(), lastUsedAt: text("last_used_at"), revokedAt: text("revoked_at"),
+}, table => [uniqueIndex("idx_recovery_codes_hash").on(table.codeHash), uniqueIndex("idx_recovery_codes_target").on(table.profileType, table.targetId)]);
+export const recoveryAttempts = sqliteTable("recovery_attempts", {
+  clientHash: text("client_hash").primaryKey(), windowStartedAt: text("window_started_at").notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0), blockedUntil: text("blocked_until"),
+});
 export const pairMemories = sqliteTable("pair_memories", {
   id: text("id").primaryKey(),
   pairId: text("pair_id").notNull(),

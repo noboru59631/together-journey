@@ -85,5 +85,6 @@ export async function clearMemory(database: D1Database, pairId: string) {
     database.prepare("DELETE FROM preference_memory_layers WHERE pair_id = ?").bind(pairId),
     database.prepare("DELETE FROM experiences WHERE journey_id = ?").bind(pairId),
     database.prepare("DELETE FROM connections WHERE journey_id = ?").bind(pairId),
+    database.prepare("UPDATE recovery_codes SET revoked_at = ? WHERE profile_type = 'pair' AND target_id = ? AND revoked_at IS NULL").bind(new Date().toISOString(), pairId),
   ]);
 }

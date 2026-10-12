@@ -7,6 +7,7 @@ import { discoveryDomains } from "../lib/discovery";
 import { domainLabel } from "../lib/i18n";
 import { ExperienceReviewCard, type ExperienceAction } from "./experience-review";
 import { LanguageToggle, useLanguage } from "./language-provider";
+import { RecoveryPanel } from "./recovery-panel";
 
 type Interest = { name: string; type: string; reaction: string };
 type Result = { title: string; category: string; mode: string; archetype: Archetype; discovery: { why: { known: string; new: string; fits: string } }; memory: { chapterId: string; explanation: string }; trace: { qlooApiCalls: unknown[] } };
@@ -73,6 +74,7 @@ export function SoloApp({ onSwitch }: { onSwitch: () => void }) {
       <button className="primary-action full" disabled={busy || !profile} onClick={() => void discover()}>{busy ? t("next.finding") : profile?.seeds.length ? t("solo.discover.next") : t("solo.interest.find")}</button>
       {result && <article className="memory-bucket solo-result"><span className="eyebrow">{t(`solo.archetype.${result.archetype}`)} · Qloo LIVE</span><h2>{result.title}</h2><p>{profile ? soloRationale({ ...profile, archetype: result.archetype, chapters: profile.chapters.filter(chapter => chapter.id !== result.memory.chapterId) }, result.category as typeof discoveryDomains[number]["id"], locale) : result.memory.explanation}</p><small>{domainLabel(locale, result.category)}</small></article>}
       <section className="memory-bucket"><h2>{t("solo.memory.title")}</h2>{!profile?.chapters.length && <p>{t("solo.memory.empty")}</p>}{profile?.chapters.map(chapter => <article className="solo-chapter" key={chapter.id}><h3>{chapter.recommendation.name}</h3><small>{domainLabel(locale, chapter.discovery?.domain ?? chapter.recommendation.category)}</small><p>{soloRationale({ ...profile, archetype: soloChapterArchetype(chapter), chapters: profile.chapters.filter(item => item.timestamp < chapter.timestamp) }, chapter.discovery?.domain ?? "place", locale)}</p><ExperienceReviewCard chapter={chapter} busy={busy} onSave={saveExperience}/></article>)}{profile?.layers.longTerm.filter(item => item.person === "A").map(item => <p key={`${item.kind}:${item.signal}`}>{item.signal}</p>)}</section>
+      <RecoveryPanel currentType="solo"/>
       <div className="memory-reset"><button className="text-action" onClick={onSwitch}>{t("solo.mode.switch")}</button><p>{t("solo.mode.warning")}</p>{confirmReset ? <><p>{t("solo.memory.confirm")}</p><button className="secondary-action" disabled={busy} onClick={() => void reset()}>{t("solo.memory.delete")}</button><button className="text-action" onClick={() => setConfirmReset(false)}>{t("timeline.keep")}</button></> : <button className="text-action" disabled={busy || !profile} onClick={() => setConfirmReset(true)}>{t("solo.memory.reset")}</button>}</div>
     </div></div></section></main>;
 }
