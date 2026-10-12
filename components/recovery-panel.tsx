@@ -11,7 +11,7 @@ export function RecoveryPanel({ currentType, onRecovered }: { currentType?: Reco
   const [active, setActive] = useState(false);
   const [code, setCode] = useState("");
   const [entry, setEntry] = useState("");
-  const [open, setOpen] = useState(Boolean(currentType));
+  const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 

@@ -10,8 +10,26 @@ const load = filename => loadTypescript(fileURLToPath(new URL(filename, import.m
 const recovery = load("../lib/recovery.ts");
 const pairStore = load("../lib/memory-store.ts");
 const soloStore = load("../lib/solo-store.ts");
+const relationshipMemory = load("../lib/relationship-memory.ts");
 const pairId = "11111111-1111-4111-8111-111111111111";
 const soloId = "22222222-2222-4222-8222-222222222222";
+const chapterId = "33333333-3333-4333-8333-333333333333";
+
+function pairChapter() {
+  return relationshipMemory.createChapter({
+    id: chapterId, pairId, timestamp: "2026-10-12T00:00:00Z", mode: "LIVE",
+    inputs: { you: "Princess Mononoke and quiet forests", partner: "Joe Hisaishi and intimate music" },
+    entities: [
+      { id: "qloo-film", name: "Princess Mononoke", type: "urn:entity:movie", participant: "you", confidence: 1, provenance: "explicit", why: "named" },
+      { id: "qloo-artist", name: "Joe Hisaishi", type: "urn:entity:artist", participant: "partner", confidence: 1, provenance: "explicit", why: "named" },
+    ],
+    participants: [
+      { id: "you", label: "You", likes: ["nature"], dislikes: ["crowds"], emotionalContext: ["quiet"] },
+      { id: "partner", label: "Partner", likes: ["music"], dislikes: [], emotionalContext: ["intimate"] },
+    ],
+    recommendation: { id: "qloo-place", name: "A grounded garden", category: "place", description: "Visit together", place: "Tokyo", rationale: "Grounded signals" },
+  });
+}
 
 function database() {
   const sqlite = new DatabaseSync(":memory:");
@@ -30,6 +48,8 @@ function database() {
 async function seededDatabase() {
   const db = database();
   await pairStore.readMemory(db, pairId);
+  await pairStore.saveMemory(db, pairChapter());
+  await pairStore.updateFeedback(db, pairId, chapterId, "liked");
   await soloStore.readSolo(db, soloId);
   await soloStore.updateSoloSettings(db, soloId, "opposite");
   return db;
@@ -57,6 +77,10 @@ test("valid recovery links the same profile without cloning memory and preserves
   const soloCode = await recovery.createRecoveryCode(db, "solo", soloId);
   assert.equal(await recovery.redeemRecoveryCode(db, "pair", pairCode, "pair-client"), pairId);
   assert.equal(await recovery.redeemRecoveryCode(db, "solo", soloCode, "solo-client"), soloId);
+  const recoveredPair = await pairStore.readMemory(db, pairId);
+  assert.equal(recoveredPair.chapters.length, 1);
+  assert.equal(recoveredPair.chapters[0].recommendation.name, "A grounded garden");
+  assert.equal(recoveredPair.chapters[0].feedback, "liked");
   assert.equal((await soloStore.readSolo(db, soloId)).archetype, "opposite");
   assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM pair_sessions").get().count, 1);
   assert.equal(db.sqlite.prepare("SELECT count(*) AS count FROM solo_sessions").get().count, 1);
@@ -74,6 +98,9 @@ test("rotation, revocation and profile reset invalidate old codes", async () => 
   assert.equal(await recovery.redeemRecoveryCode(db, "pair", newPair, "new-pair"), pairId);
   await recovery.revokeRecoveryCode(db, "pair", pairId);
   assert.equal(await recovery.redeemRecoveryCode(db, "pair", newPair, "revoked-pair"), null);
+  const resetPair = await recovery.createRecoveryCode(db, "pair", pairId);
+  await pairStore.clearMemory(db, pairId);
+  assert.equal(await recovery.redeemRecoveryCode(db, "pair", resetPair, "reset-pair"), null);
   const soloCode = await recovery.createRecoveryCode(db, "solo", soloId);
   await soloStore.clearSolo(db, soloId);
   assert.equal(await recovery.redeemRecoveryCode(db, "solo", soloCode, "reset-solo"), null);

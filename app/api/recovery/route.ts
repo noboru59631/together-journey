@@ -54,8 +54,9 @@ export async function POST(request: NextRequest) {
     if (!env.DB) throw new Error("Storage unavailable");
     const { action, type } = parsed.data;
     if (action === "redeem") {
-      const forwarded = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-      const clientHash = await hashRecoveryClient(`${forwarded}|${request.headers.get("user-agent") ?? "unknown"}`);
+      const forwarded = request.headers.get("cf-connecting-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+      const clientIdentity = forwarded ? `ip:${forwarded}` : `user-agent:${request.headers.get("user-agent") ?? "unknown"}`;
+      const clientHash = await hashRecoveryClient(clientIdentity);
       const id = await redeemRecoveryCode(env.DB, type, parsed.data.code, clientHash);
       if (!id) return response({ error: translate(locale, "recovery.error.generic") }, 400);
       const result = response({ recovered: true, type });
